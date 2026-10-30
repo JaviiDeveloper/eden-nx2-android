@@ -2,11 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include <array>
-#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <string_view>
-#include <thread>
 #include <type_traits>
 #include <unordered_map>
 
@@ -34,18 +32,23 @@ public:
         std::array<Pending, 256> pending{};
         std::size_t count = 1;
         pending[0] = {address, argument & 15, ((argument >> 14) & 0x3ff) + 1};
-        // A QMD whose version word is wrong may still be in flight from an upload on another
-        // thread (seen once in DK Bananza: a mix of old and new words). Re-read it for a while.
+        // DK Bananza also writes a second layout: the six words that sit at 38-43 come first
+        // (words 2-7) and words 2-37 follow six words later, so the version word is at 24.
+        // Its releases and dependent QMD line up after moving the words back; its grid and
+        // program fields are not understood yet, so it completes without a dispatch.
         const auto read_valid = [&](Address qmd_address, Descriptor& qmd) {
-            for (int attempt = 0;; ++attempt) {
-                if (!read(qmd_address, qmd)) return false;
-                if ((qmd[18] & 0xff) == 0x30 && !(qmd[4] & 0x100)) {
-                    if (attempt) LOG_WARNING(HW_GPU, "QMD {:#x} became valid after {} re-reads", qmd_address, attempt);
-                    return true;
-                }
-                if (attempt == 50) return true;
-                std::this_thread::sleep_for(std::chrono::milliseconds{1});
+            if (!read(qmd_address, qmd)) return false;
+            if ((qmd[18] & 0xff) == 0x30 || (qmd[24] & 0xff) != 0x30 || (qmd[10] & 0x100)) return true;
+            const Descriptor shifted = qmd;
+            for (std::size_t i = 2; i < 38; ++i) qmd[i] = shifted[i + 6];
+            for (std::size_t i = 0; i < 6; ++i) qmd[38 + i] = shifted[2 + i];
+            qmd[12] = 0;
+            if (static bool logged{}; !logged) {
+                logged = true;
+                LOG_WARNING(HW_GPU, "QMD {:#x} uses the shifted layout; completing it without a dispatch",
+                            qmd_address);
             }
+            return true;
         };
         for (std::size_t i = 0; i < count; ++i) {
             const auto request = pending[i];
