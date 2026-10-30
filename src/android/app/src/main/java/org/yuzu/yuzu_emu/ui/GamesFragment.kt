@@ -7,7 +7,11 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -41,12 +45,15 @@ import org.yuzu.yuzu_emu.model.Game
 import org.yuzu.yuzu_emu.model.GamesViewModel
 import org.yuzu.yuzu_emu.model.HomeViewModel
 import org.yuzu.yuzu_emu.ui.main.MainActivity
+import org.yuzu.yuzu_emu.utils.PathUtil
 import org.yuzu.yuzu_emu.utils.ViewUtils.setVisible
 import org.yuzu.yuzu_emu.utils.collect
 import info.debatty.java.stringsimilarity.Jaccard
 import info.debatty.java.stringsimilarity.JaroWinkler
+import java.io.File
 import java.util.Locale
 import androidx.core.content.edit
+import androidx.core.net.toUri
 
 class GamesFragment : Fragment() {
     private var _binding: FragmentGamesBinding? = null
@@ -82,6 +89,65 @@ class GamesFragment : Fragment() {
                 mainActivity.processGamesDir(result, true)
             }
         }
+
+    private val getExeFSFolder =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { result ->
+            if (result != null) {
+                launchExeFSFolder(result)
+            }
+        }
+
+    private fun showAddDirectoryMenu(anchor: View) {
+        val popup = PopupMenu(requireContext(), anchor)
+        popup.menu.add(0, 0, 0, R.string.add_games)
+        popup.menu.add(0, 1, 1, R.string.launch_exefs_folder)
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                0 -> getGamesDirectory.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).data)
+                1 -> getExeFSFolder.launch(null)
+            }
+            true
+        }
+        popup.show()
+    }
+
+    // Loose ExeFS titles (Switch 2) are loaded from exefs/main and need its sibling files, which
+    // content URIs can't reach, so they launch through the real path with all files access.
+    private fun launchExeFSFolder(uri: Uri) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            !Environment.isExternalStorageManager()
+        ) {
+            Toast.makeText(
+                requireContext(),
+                R.string.exefs_folder_needs_permission,
+                Toast.LENGTH_LONG
+            ).show()
+            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+            intent.data = "package:${requireContext().packageName}".toUri()
+            startActivity(intent)
+            return
+        }
+
+        val path = PathUtil.getPathFromUri(uri)
+        if (path == null) {
+            Toast.makeText(requireContext(), R.string.exefs_folder_bad_path, Toast.LENGTH_LONG)
+                .show()
+            return
+        }
+
+        // Accept either the game folder (containing exefs/) or the exefs folder itself.
+        val folder = File(path)
+        val main = listOf(File(folder, "exefs/main"), File(folder, "main")).firstOrNull { it.isFile }
+        if (main == null) {
+            Toast.makeText(requireContext(), R.string.exefs_folder_no_main, Toast.LENGTH_LONG)
+                .show()
+            return
+        }
+
+        val gameFolder = if (main.parentFile == folder) folder.parentFile ?: folder else folder
+        val game = Game(title = gameFolder.name, path = main.absolutePath)
+        findNavController().navigate(HomeNavigationDirections.actionGlobalEmulationActivity(game))
+    }
 
     private fun getCurrentViewType(): Int {
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -182,9 +248,7 @@ class GamesFragment : Fragment() {
 
         updateButtonsVisibility()
 
-        binding.addDirectory.setOnClickListener {
-            getGamesDirectory.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).data)
-        }
+        binding.addDirectory.setOnClickListener { showAddDirectoryMenu(it) }
 
         binding.launchQlaunch?.setOnClickListener {
             launchQLaunch()

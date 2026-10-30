@@ -458,6 +458,12 @@
     <string name="error_keys_invalid_filename">Verify your keys file has a .keys extension and try again.</string>
     <string name="error_keys_failed_init">Keys failed to initialize. Check that your dumping tools are up to date and re-dump keys.</string>
 
+    <!-- Loose ExeFS (Switch 2) launch strings -->
+    <string name="launch_exefs_folder">Launch ExeFS game folder</string>
+    <string name="exefs_folder_no_main">No exefs/main found in the selected folder</string>
+    <string name="exefs_folder_bad_path">Could not resolve the selected folder to a storage path</string>
+    <string name="exefs_folder_needs_permission">Grant all files access, then select the folder again</string>
+
     <!-- Applet launcher strings -->
     <string name="qlaunch_applet">Qlaunch</string>
     <string name="qlaunch_description">Launch applications from the system home screen</string>
