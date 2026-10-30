@@ -362,7 +362,11 @@ BufferCacheRuntime::BufferCacheRuntime(const Device& device_, MemoryAllocator& m
     limit_dynamic_storage_buffers = driver_id == VK_DRIVER_ID_QUALCOMM_PROPRIETARY ||
                                     driver_id == VK_DRIVER_ID_ARM_PROPRIETARY;
     if (limit_dynamic_storage_buffers) {
-        max_dynamic_storage_buffers = device.GetMaxDescriptorSetStorageBuffersDynamic();
+        // Pipelines use plain (not dynamic) storage buffer descriptors, so the dynamic limit (16
+        // on Adreno) doesn't apply. A buffer skipped here also leaves the pipeline's descriptor
+        // list short, and Adreno crashes in vkUpdateDescriptorSetWithTemplate on the shifted
+        // entries (Switch 2 compute shaders bind 18).
+        max_dynamic_storage_buffers = device.GetMaxDescriptorSetStorageBuffers();
     }    
     if (device.SupportsUint8Indices()) {
         uint8_pass = std::make_unique<Uint8Pass>(device, scheduler, descriptor_pool, staging_pool,
