@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <cstddef>
+#include <cstdlib>
 #include <limits>
 #include <map>
 #include <memory>
@@ -167,6 +168,12 @@ public:
 
     void StartCounter() override {
         if (has_started) {
+            return;
+        }
+        // EDEN_NX2_NO_OCCLUSION=1: record no host occlusion queries (diagnostics: DK Bananza
+        // crashed in vkCmdBeginQuery on Adreno). Sample counts then read as 0.
+        static const bool no_occlusion = std::getenv("EDEN_NX2_NO_OCCLUSION") != nullptr;
+        if (no_occlusion) {
             return;
         }
 
