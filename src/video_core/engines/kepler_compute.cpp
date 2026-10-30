@@ -13,6 +13,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include "common/assert.h"
 #include "common/logging.h"
 #include "shader_recompiler/exception.h"
@@ -590,31 +591,70 @@ std::atomic<u32> g_nx2_trace_draws_after_upscale{};
 
 // Title 4's upscaler reads the tonemapped frame through the texture handle at cbuf0+0x90 and
 // writes the output resolution image through the surface handle at cbuf0+0xa0 (from its
-// TLD/SUST operands). Blit one to the other with bilinear filtering when both are plain 2D images
-// of the same format and the output is larger.
+// TLD/SUST operands). DKB's reads a 960x540 B10G11R11 colour image and writes the 2880x1620
+// A8B8G8R8 window image. Blit input to output with bilinear filtering when both are plain 2D
+// colour images and the output is larger.
 bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
     const auto& cbuf = launch_description.const_buffer_config[0];
     const GPUVAddr cbuf_address = (GPUVAddr{cbuf.address_high} << 32) | cbuf.address_low;
     const auto image = [&](u32 offset) -> std::optional<Texture::TICEntry> {
-        const u32 tic_index = memory_manager.Read<u32>(cbuf_address + offset) & 0xfffff;
-        if (tic_index > regs.tic.limit) return std::nullopt;
+        const u32 handle = memory_manager.Read<u32>(cbuf_address + offset);
+        const u32 tic_index = handle & 0xfffff;
+        if (handle == 0 || tic_index > regs.tic.limit) return std::nullopt;
         return GetTICEntry(tic_index);
     };
-    const auto input = image(0x90), output = image(0xa0);
-    if (!input || !output || input->format != output->format || input->Address() == 0 ||
-        output->Address() == 0 || output->Width() <= input->Width() || !input->IsBlockLinear() ||
-        !output->IsBlockLinear())
-        return false;
     using RTFormat = Tegra::RenderTargetFormat;
-    RTFormat format{};
-    switch (input->format) {
-    case Texture::TextureFormat::A2B10G10R10: format = RTFormat::A2B10G10R10_UNORM; break;
-    case Texture::TextureFormat::A8B8G8R8: format = RTFormat::A8B8G8R8_UNORM; break;
-    case Texture::TextureFormat::B10G11R11: format = RTFormat::B10G11R11_FLOAT; break;
-    case Texture::TextureFormat::R16G16B16A16: format = RTFormat::R16G16B16A16_FLOAT; break;
-    default: return false;
+    const auto render_format = [](Texture::TextureFormat format) -> std::optional<RTFormat> {
+        switch (format) {
+        case Texture::TextureFormat::A2B10G10R10: return RTFormat::A2B10G10R10_UNORM;
+        case Texture::TextureFormat::A8B8G8R8: return RTFormat::A8B8G8R8_UNORM;
+        case Texture::TextureFormat::B10G11R11: return RTFormat::B10G11R11_FLOAT;
+        case Texture::TextureFormat::R16G16B16A16: return RTFormat::R16G16B16A16_FLOAT;
+        default: return std::nullopt;
+        }
+    };
+    const auto usable = [&](u32 offset) -> std::optional<Texture::TICEntry> {
+        const auto tic = image(offset);
+        if (!tic || tic->Address() == 0 || !tic->IsBlockLinear() || !render_format(tic->format))
+            return std::nullopt;
+        return tic;
+    };
+    std::optional<Texture::TICEntry> input = usable(0x90), output = usable(0xa0);
+    u32 input_offset = 0x90, output_offset = 0xa0;
+    if (!input || !output || output->Width() <= input->Width()) {
+        // Otherwise (DKB, whose handles move between dispatches) the output is the largest image
+        // and the input the largest smaller one with the same aspect ratio.
+        input.reset(), output.reset();
+        const auto area = [](const Texture::TICEntry& tic) { return u64{tic.Width()} * tic.Height(); };
+        for (u32 offset = 0x80; offset < 0x120; offset += 4) {
+            if (const auto tic = usable(offset); tic && (!output || area(*tic) > area(*output))) {
+                output = tic, output_offset = offset;
+            }
+        }
+        for (u32 offset = 0x80; output && offset < 0x120; offset += 4) {
+            const auto tic = usable(offset);
+            if (!tic || tic->Width() >= output->Width() || tic->Height() >= output->Height()) continue;
+            const u64 cross = u64{tic->Width()} * output->Height();
+            const u64 expected = u64{output->Width()} * tic->Height();
+            if ((cross > expected ? cross - expected : expected - cross) * 50 > expected) continue;
+            if (!input || area(*tic) > area(*input)) input = tic, input_offset = offset;
+        }
     }
-    const auto surface = [&](const Texture::TICEntry& tic) {
+    if (!input) {
+        static bool logged_failure{};
+        if (!std::exchange(logged_failure, true)) {
+            LOG_INFO(HW_GPU, "Upscale fallback: no plain 2D colour input/output pair in cbuf0 handles");
+        }
+        return false;
+    }
+    if (static bool logged_pair{}; !std::exchange(logged_pair, true)) {
+        LOG_INFO(HW_GPU, "Upscale fallback: cbuf0 {:#x} -> {:#x}, format {:#x} -> {:#x}", input_offset,
+                 output_offset, static_cast<u32>(input->format.Value()),
+                 static_cast<u32>(output->format.Value()));
+    }
+    const RTFormat input_format = *render_format(input->format);
+    const RTFormat output_format = *render_format(output->format);
+    const auto surface = [&](const Texture::TICEntry& tic, RTFormat format) {
         Fermi2D::Surface result{};
         result.format = format;
         result.linear = Fermi2D::MemoryLayout::BlockLinear;
@@ -687,7 +727,7 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
             (void)fake;
         }
     }
-    auto source = surface(*input);
+    auto source = surface(*input, input_format);
     // EDEN_NX2_UPSCALE_SOURCE=<gpu address>: blit from another same-sized image (debug aid).
     if (static const u64 override_source = [] {
             const char* value = std::getenv("EDEN_NX2_UPSCALE_SOURCE");
@@ -700,7 +740,7 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
             source.format = static_cast<RTFormat>(std::strtoul(value, nullptr, 16));
         }
     }
-    const bool done = rasterizer->AccelerateSurfaceCopy(source, surface(*output), config);
+    const bool done = rasterizer->AccelerateSurfaceCopy(source, surface(*output, output_format), config);
     if (static u32 checked{}; checked++ == sample_at) {
         const u64 size = u64{output->Width()} * output->Height() * 4;
         if (const auto device = memory_manager.GpuToCpuAddress(output->Address())) {
