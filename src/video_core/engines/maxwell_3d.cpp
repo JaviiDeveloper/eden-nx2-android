@@ -18,6 +18,7 @@
 #include "video_core/dirty_flags.h"
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/engines/maxwell_3d.h"
+#include "video_core/host1x/syncpoint_manager.h"
 #include "video_core/gpu.h"
 #include "video_core/gpu_split.h"
 #include "video_core/memory_manager.h"
@@ -705,6 +706,11 @@ void Maxwell3D::ProcessSyncPoint() {
     }
     const u32 sync_point = regs.sync_info.sync_point.Value();
     [[maybe_unused]] const u32 cache_flush = regs.sync_info.clean_l2.Value();
+    if (sync_point >= Tegra::Host1x::SyncpointManager::NUM_MAX_SYNCPOINTS) {
+        LOG_ERROR(HW_GPU, "Syncpoint increment of out-of-range id {} (raw {:#x}) dropped", sync_point,
+                  regs.reg_array[MAXWELL3D_REG_INDEX(sync_info)]);
+        return;
+    }
     rasterizer->SignalSyncPoint(sync_point);
 }
 
