@@ -4,6 +4,8 @@
 // SPDX-FileCopyrightText: Copyright 2019 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <chrono>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -13,6 +15,7 @@
 
 #include "video_core/renderer_vulkan/vk_query_cache.h"
 
+#include "common/logging.h"
 #include "common/settings.h"
 #include "common/thread.h"
 #include "video_core/gpu_logging/gpu_logging.h"
@@ -400,6 +403,24 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
     });
     chunk->MarkSubmit();
     DispatchWork();
+    if (static const bool trace = std::getenv("EDEN_NX2_TICK_TRACE") != nullptr; trace) {
+        static auto next = std::chrono::steady_clock::now();
+        if (const auto now = std::chrono::steady_clock::now(); now >= next) {
+            next = now + std::chrono::seconds{2};
+            size_t queued, reserved;
+            {
+                std::scoped_lock ql{queue_mutex};
+                queued = work_queue.size();
+            }
+            {
+                std::scoped_lock rl{reserve_mutex};
+                reserved = chunk_reserve.size();
+            }
+            LOG_INFO(Render_Vulkan, "Tick trace: current {} gpu {} queued chunks {} reserve {}",
+                     master_semaphore->CurrentTick(), master_semaphore->KnownGpuTick(), queued,
+                     reserved);
+        }
+    }
     return signal_value;
 }
 
