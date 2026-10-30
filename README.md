@@ -48,8 +48,6 @@ It's written in C++ with portability in mind, with builds for Windows, Linux and
 
 ## Compatibility
 
-The emulator is capable of running Mario Kart World at decent/full speed depending on specs and configurations, and Splatoon Raiders at variable performances
-
 A list of supported games will be available in future. Please be patient.
 
 ## Development

@@ -1,6 +1,6 @@
 # Splitting the GPU thread
 
-Title 1 (Mario Kart World) is bound by one host thread, the GPU thread: ~100% busy while the
+Title 1 (a game) is bound by one host thread, the GPU thread: ~100% busy while the
 host GPU is 20-40% busy and the game's own CPU thread mostly polls the counter. Per second of
 3D scenes (profiled, 2026-10-29): command processing and register writes ~335 ms, macros
 ~200 ms (1.3 million calls), draw setup ~345 ms (55,000 draws), compute ~70 ms. Speeding up the
