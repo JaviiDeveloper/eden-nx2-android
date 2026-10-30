@@ -2,11 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
+
+#include "common/logging.h"
 
 namespace Tegra {
 
@@ -30,6 +34,19 @@ public:
         std::array<Pending, 256> pending{};
         std::size_t count = 1;
         pending[0] = {address, argument & 15, ((argument >> 14) & 0x3ff) + 1};
+        // A QMD whose version word is wrong may still be in flight from an upload on another
+        // thread (seen once in DK Bananza: a mix of old and new words). Re-read it for a while.
+        const auto read_valid = [&](Address qmd_address, Descriptor& qmd) {
+            for (int attempt = 0;; ++attempt) {
+                if (!read(qmd_address, qmd)) return false;
+                if ((qmd[18] & 0xff) == 0x30 && !(qmd[4] & 0x100)) {
+                    if (attempt) LOG_WARNING(HW_GPU, "QMD {:#x} became valid after {} re-reads", qmd_address, attempt);
+                    return true;
+                }
+                if (attempt == 50) return true;
+                std::this_thread::sleep_for(std::chrono::milliseconds{1});
+            }
+        };
         for (std::size_t i = 0; i < count; ++i) {
             const auto request = pending[i];
             if (states.size() >= 4096 && !states.contains(request.address)) {
@@ -42,7 +59,7 @@ public:
             auto& state = states[request.address];
             if (request.action == 3 || request.action == 2) {
                 if (request.action == 3 || !state.loaded) {
-                    if (!read(request.address, state.descriptor)) return "unmapped QMD";
+                    if (!read_valid(request.address, state.descriptor)) return "unmapped QMD";
                     const auto& qmd = state.descriptor;
                     if ((qmd[18] & 0xff) != 0x30 || (qmd[4] & 0x100)) return "unsupported QMD version or queue";
                     if constexpr (std::is_same_v<Dispatch, RejectShaderDispatch>) {
@@ -75,7 +92,7 @@ public:
             if (state.dependencies < 0) return "QMD dependency underflow";
             // The SDK patches release payloads while a scheduled QMD is
             // waiting for its remaining dependencies. Fetch them at execution.
-            if (!read(request.address, state.descriptor)) return "unmapped QMD";
+            if (!read_valid(request.address, state.descriptor)) return "unmapped QMD";
             const auto qmd = state.descriptor;
             if ((qmd[18] & 0xff) != 0x30 || (qmd[4] & 0x100)) return "unsupported QMD version or queue";
             // Validate the release slots before making any visible.
