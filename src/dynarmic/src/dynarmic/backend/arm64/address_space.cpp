@@ -8,6 +8,7 @@
 
 #include <cstdio>
 
+#include <algorithm>
 #include <bit>
 
 #include "dynarmic/backend/arm64/a64_address_space.h"
@@ -270,7 +271,7 @@ void AddressSpace::Link(EmittedBlockInfo& block_info) {
         }
     }
 
-    for (auto [target_descriptor, list] : block_info.block_relocations) {
+    for (const auto& [target_descriptor, list] : block_info.block_relocations) {
         block_references[target_descriptor].insert(block_info.entry_point);
         LinkBlockLinks(block_info.entry_point, Get(target_descriptor), list);
     }
@@ -310,7 +311,8 @@ void AddressSpace::RelinkForDescriptor(IR::LocationDescriptor target_descriptor,
         if (auto block_iter = block_infos.find(code_ptr); block_iter != block_infos.end()) {
             const EmittedBlockInfo& block_info = block_iter->second;
 
-            if (auto relocation_iter = block_info.block_relocations.find(target_descriptor); relocation_iter != block_info.block_relocations.end()) {
+            const auto& relocations = block_info.block_relocations;
+            if (auto relocation_iter = std::find_if(relocations.begin(), relocations.end(), [&](const auto& entry) { return entry.first == target_descriptor; }); relocation_iter != relocations.end()) {
                 LinkBlockLinks(block_info.entry_point, target_ptr, relocation_iter->second);
             }
 
@@ -333,8 +335,9 @@ FakeCall AddressSpace::FastmemCallback(u64 host_pc) {
             goto fail;
         }
 
-        const auto patch_entry = block_info->second.fastmem_patch_info.find(host_ptr - entry_point);
-        if (patch_entry == block_info->second.fastmem_patch_info.end()) {
+        const auto& patches = block_info->second.fastmem_patch_info;
+        const auto patch_entry = std::find_if(patches.begin(), patches.end(), [&](const auto& entry) { return entry.first == host_ptr - entry_point; });
+        if (patch_entry == patches.end()) {
             goto fail;
         }
 
