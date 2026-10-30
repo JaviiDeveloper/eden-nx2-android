@@ -1055,6 +1055,8 @@
     <string name="memory_4gb">4GB (Recommended)</string>
     <string name="memory_6gb">6GB (Unsafe)</string>
     <string name="memory_8gb">8GB (Unsafe)</string>
+    <string name="memory_10gb">10GB (Unsafe)</string>
+    <string name="memory_12gb">12GB (Switch 2, Unsafe)</string>
 
     <!-- CPU clock levels -->
     <string name="clock_normal">Normal</string>
