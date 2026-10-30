@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <memory>
+#include <mutex>
 #include "common/assert.h"
 #include "common/common_types.h"
 #include "common/logging.h"
@@ -19,6 +20,31 @@
 #include "core/loader/loader.h"
 
 namespace FileSys {
+
+namespace {
+std::mutex loose_aoc_mutex;
+std::map<u64, VirtualFile> loose_aoc;
+} // namespace
+
+void SetLooseAddOnContent(std::map<u64, VirtualFile> entries) {
+    std::scoped_lock lock{loose_aoc_mutex};
+    loose_aoc = std::move(entries);
+}
+
+VirtualFile GetLooseAddOnContent(u64 title_id) {
+    std::scoped_lock lock{loose_aoc_mutex};
+    const auto it = loose_aoc.find(title_id);
+    return it != loose_aoc.end() ? it->second : nullptr;
+}
+
+std::vector<u64> ListLooseAddOnContent() {
+    std::scoped_lock lock{loose_aoc_mutex};
+    std::vector<u64> ids;
+    for (const auto& [title_id, file] : loose_aoc) {
+        ids.push_back(title_id);
+    }
+    return ids;
+}
 
 RomFSFactory::RomFSFactory(Loader::AppLoader& app_loader, ContentProvider& provider,
                            Service::FileSystem::FileSystemController& controller)
@@ -69,6 +95,11 @@ VirtualFile RomFSFactory::OpenPatchedRomFSWithProgramIndex(u64 title_id, u8 prog
 }
 
 VirtualFile RomFSFactory::Open(u64 title_id, StorageId storage, ContentRecordType type) const {
+    if (type == ContentRecordType::Data) {
+        if (auto loose = GetLooseAddOnContent(title_id)) {
+            return loose;
+        }
+    }
     const std::shared_ptr<NCA> res = GetEntry(title_id, storage, type);
     if (res == nullptr) {
         return nullptr;

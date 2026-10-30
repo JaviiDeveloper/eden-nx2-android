@@ -17,6 +17,7 @@
 #include "core/file_sys/nca_metadata.h"
 #include "core/file_sys/patch_manager.h"
 #include "core/file_sys/registered_cache.h"
+#include "core/file_sys/romfs_factory.h"
 #include "core/hle/kernel/k_event.h"
 #include "core/hle/service/aoc/addon_content_manager.h"
 #include "core/hle/service/aoc/purchase_event_manager.h"
@@ -51,6 +52,11 @@ static std::vector<u64> AccumulateAOCTitleIDs(Core::System& system) {
                        Loader::ResultStatus::Success;
             }),
         add_on_content.end());
+    for (const u64 tid : FileSys::ListLooseAddOnContent()) {
+        if (std::find(add_on_content.begin(), add_on_content.end(), tid) == add_on_content.end()) {
+            add_on_content.push_back(tid);
+        }
+    }
     return add_on_content;
 }
 

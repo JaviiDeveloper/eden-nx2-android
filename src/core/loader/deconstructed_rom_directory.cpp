@@ -5,12 +5,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string_view>
 #include "common/logging.h"
 #include "common/random.h"
 #include "common/settings.h"
 #include "core/core.h"
+#include "core/file_sys/common_funcs.h"
 #include "core/file_sys/content_archive.h"
 #include "core/file_sys/control_metadata.h"
 #include "core/file_sys/patch_manager.h"
@@ -151,6 +154,59 @@ std::vector<FileSys::VirtualDir> FindSidecarDirs(const FileSys::VirtualDir& exef
         dir = parent;
     }
     return dirs;
+}
+
+// Add-on content of a loose title: a dlc/ directory in the game folder or up to two levels above
+// it (base/, updates/<version>/ and dlc/ side by side), holding <title id>/<version>/romfs.
+std::map<u64, FileSys::VirtualFile> FindLooseAddOnContent(const FileSys::VirtualDir& exefs_dir,
+                                                         u64 base_title_id) {
+    std::map<u64, FileSys::VirtualFile> entries;
+    FileSys::VirtualDir dlc_dir;
+    auto search = exefs_dir != nullptr ? exefs_dir->GetParentDirectory() : nullptr;
+    for (int level = 0; level < 3 && search != nullptr && dlc_dir == nullptr; ++level) {
+        dlc_dir = search->GetSubdirectory("dlc");
+        search = search->GetParentDirectory();
+    }
+    if (dlc_dir == nullptr) {
+        return entries;
+    }
+    for (const auto& title_dir : dlc_dir->GetSubdirectories()) {
+        const auto& name = title_dir->GetName();
+        char* end = nullptr;
+        const u64 title_id = std::strtoull(name.c_str(), &end, 16);
+        if (name.size() != 16 || *end != '\0' ||
+            FileSys::GetBaseTitleID(title_id) != FileSys::GetBaseTitleID(base_title_id) ||
+            title_id == base_title_id) {
+            continue;
+        }
+        // The highest numbered version directory with a romfs/, else a romfs/ directly inside.
+        FileSys::VirtualDir romfs_dir;
+        u64 best_version = 0;
+        for (const auto& version_dir : title_dir->GetSubdirectories()) {
+            const auto& version_name = version_dir->GetName();
+            char* version_end = nullptr;
+            const u64 version = std::strtoull(version_name.c_str(), &version_end, 10);
+            if (version_name.empty() || *version_end != '\0') {
+                continue;
+            }
+            if (const auto candidate = version_dir->GetSubdirectory("romfs");
+                candidate != nullptr && (romfs_dir == nullptr || version >= best_version)) {
+                romfs_dir = candidate;
+                best_version = version;
+            }
+        }
+        if (romfs_dir == nullptr) {
+            romfs_dir = title_dir->GetSubdirectory("romfs");
+        }
+        if (romfs_dir == nullptr) {
+            continue;
+        }
+        if (auto romfs = FileSys::CreateRomFS(romfs_dir)) {
+            LOG_INFO(Loader, "Using loose add-on content {:016X}", title_id);
+            entries.emplace(title_id, std::move(romfs));
+        }
+    }
+    return entries;
 }
 
 } // namespace
@@ -305,6 +361,10 @@ AppLoader_DeconstructedRomDirectory::LoadResult AppLoader_DeconstructedRomDirect
                      metadata.GetTitleID());
         }
     }
+
+    // From the loaded file: a patched ExeFS has no parent directory to search from.
+    FileSys::SetLooseAddOnContent(
+        FindLooseAddOnContent(file->GetContainingDirectory(), metadata.GetTitleID()));
 
     // Enable NCE only for applications with 39-bit address space.
     const bool is_39bit =
