@@ -45,6 +45,7 @@ import org.yuzu.yuzu_emu.model.Game
 import org.yuzu.yuzu_emu.model.GamesViewModel
 import org.yuzu.yuzu_emu.model.HomeViewModel
 import org.yuzu.yuzu_emu.ui.main.MainActivity
+import org.yuzu.yuzu_emu.utils.GameHelper
 import org.yuzu.yuzu_emu.utils.PathUtil
 import org.yuzu.yuzu_emu.utils.ViewUtils.setVisible
 import org.yuzu.yuzu_emu.utils.collect
@@ -135,17 +136,13 @@ class GamesFragment : Fragment() {
             return
         }
 
-        // Accept either the game folder (containing exefs/) or the exefs folder itself.
-        val folder = File(path)
-        val main = listOf(File(folder, "exefs/main"), File(folder, "main")).firstOrNull { it.isFile }
-        if (main == null) {
+        val game = GameHelper.getExeFSGame(File(path))
+        if (game == null) {
             Toast.makeText(requireContext(), R.string.exefs_folder_no_main, Toast.LENGTH_LONG)
                 .show()
             return
         }
 
-        val gameFolder = if (main.parentFile == folder) folder.parentFile ?: folder else folder
-        val game = Game(title = gameFolder.name, path = main.absolutePath)
         findNavController().navigate(HomeNavigationDirections.actionGlobalEmulationActivity(game))
     }
 

@@ -238,6 +238,8 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         if (intent.action == CustomSettingsHandler.CUSTOM_CONFIG_ACTION) {
             handleEmuReadyIntent(intent)
             return
+        } else if (intent.hasExtra(EXTRA_EXEFS_PATH)) {
+            intentGame = GameHelper.getExeFSGame(File(intent.getStringExtra(EXTRA_EXEFS_PATH)!!))
         } else if (intentUri != null) {
             intentGame = if (Game.extensions.contains(FileUtil.getExtension(intentUri))) {
                 GameHelper.getGame(requireActivity().intent.data!!, false)
@@ -2481,6 +2483,10 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
     }
 
     companion object {
+        // Debug launches over adb: am start -n <package>/org.yuzu.yuzu_emu.activities.EmulationActivity
+        // --es exefs_path /sdcard/<game folder>
+        const val EXTRA_EXEFS_PATH = "exefs_path"
+
         private val AMIIBO_MIME_TYPES =
             arrayOf("application/octet-stream", "application/x-binary", "*/*")
         private val perfStatsUpdateHandler = Handler(Looper.myLooper()!!)

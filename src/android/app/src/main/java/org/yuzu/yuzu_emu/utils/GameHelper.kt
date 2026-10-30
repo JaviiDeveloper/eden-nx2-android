@@ -255,6 +255,15 @@ object GameHelper {
         }
     }
 
+    // Loose ExeFS titles (Switch 2) boot from exefs/main by real path. Accepts the game folder
+    // (containing exefs/) or the exefs folder itself.
+    fun getExeFSGame(folder: File): Game? {
+        val main = listOf(File(folder, "exefs/main"), File(folder, "main")).firstOrNull { it.isFile }
+            ?: return null
+        val gameFolder = if (main.parentFile == folder) folder.parentFile ?: folder else folder
+        return Game(title = gameFolder.name, path = main.absolutePath)
+    }
+
     fun getGame(
         uri: Uri,
         addedToLibrary: Boolean,
