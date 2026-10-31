@@ -18,6 +18,8 @@ import androidx.core.net.toUri
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.libsdl.app.SDL
 import java.lang.ref.WeakReference
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.yuzu.yuzu_emu.activities.EmulationActivity
 import org.yuzu.yuzu_emu.fragments.CoreErrorDialogFragment
 import org.yuzu.yuzu_emu.utils.DocumentsTree
@@ -186,6 +188,20 @@ object NativeLibrary {
      * Stops emulation.
      */
     external fun stopEmulation()
+
+    @Volatile
+    private var stopLatch: CountDownLatch? = null
+
+    /**
+     * Stops emulation and waits up to [timeoutMs] for the session to shut down.
+     * Returns false on timeout. Not for the main thread.
+     */
+    fun stopEmulationAndWait(timeoutMs: Long): Boolean {
+        val latch = CountDownLatch(1)
+        stopLatch = latch
+        stopEmulation()
+        return latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+    }
 
     /**
      * Returns true if emulation is running (or is paused).
@@ -447,7 +463,9 @@ object NativeLibrary {
     @Keep
     @JvmStatic
     fun onEmulationStopped(status: Int) {
-        sEmulationActivity.get()!!.onEmulationStopped(status)
+        stopLatch?.countDown()
+        // The activity is gone when the session is stopped after its task was removed.
+        sEmulationActivity.get()?.onEmulationStopped(status)
     }
 
     @Keep
