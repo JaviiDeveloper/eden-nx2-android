@@ -170,6 +170,13 @@ else()
             # Some compilers could particularly misbehave :)
             $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-error-all>)
     endif()
+    if (ENABLE_WERROR AND ANDROID)
+        # NS2's Switch 2 code is only built with GCC and -Werror off; keep these clang warnings
+        # non-fatal so its headers (lower_to_maxwell.h) and services stay unmodified.
+        add_compile_options(
+            $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-error=logical-op-parentheses>
+            $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-error=sign-compare>)
+    endif()
     add_compile_options(
         $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-attributes>
         $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-invalid-offsetof>
