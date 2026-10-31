@@ -82,6 +82,20 @@ class HomeSettingsFragment : Fragment() {
         val optionsList: MutableList<HomeSetting> = mutableListOf<HomeSetting>().apply {
             add(
                 HomeSetting(
+                    R.string.switch2_readiness,
+                    R.string.switch2_readiness_description,
+                    R.drawable.ic_check_circle,
+                    {
+                        val action = HomeNavigationDirections.actionGlobalSettingsSubscreenActivity(
+                            SettingsSubscreen.SWITCH2_READINESS,
+                            null
+                        )
+                        binding.root.findNavController().navigate(action)
+                    }
+                )
+            )
+            add(
+                HomeSetting(
                     R.string.advanced_settings,
                     R.string.settings_description,
                     R.drawable.ic_settings,

@@ -37,6 +37,7 @@ enum class SettingsSubscreen {
     LICENSES,
     GAME_INFO,
     ADDONS,
+    SWITCH2_READINESS,
 }
 
 class SettingsSubscreenActivity : AppCompatActivity() {
@@ -135,6 +136,7 @@ class SettingsSubscreenActivity : AppCompatActivity() {
             SettingsSubscreen.LICENSES -> R.id.licensesFragment
             SettingsSubscreen.GAME_INFO -> R.id.gameInfoFragment
             SettingsSubscreen.ADDONS -> R.id.addonsFragment
+            SettingsSubscreen.SWITCH2_READINESS -> R.id.switch2ReadinessFragment
         }
 
     private fun createStartDestinationArgs(): Bundle =
