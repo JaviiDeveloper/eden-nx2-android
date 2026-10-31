@@ -144,6 +144,12 @@ android {
 
             isMinifyEnabled = true
             isDebuggable = false
+            // Shipped builds run the tested defaults; nx2_env.txt switches are for dev builds only.
+            externalNativeBuild {
+                cmake {
+                    cppFlags += "-DEDEN_NX2_NO_ENV_FILE"
+                }
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

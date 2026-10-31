@@ -771,8 +771,10 @@ void Java_org_yuzu_yuzu_1emu_NativeLibrary_setAppDirectory(JNIEnv* env, jobject 
     const std::string directory = Common::Android::GetJString(env, j_directory);
     Common::FS::SetAppDirectory(directory);
 
+#ifndef EDEN_NX2_NO_ENV_FILE
     // The EDEN_NX2_* diagnostics switches are environment variables, which Android apps can't be
     // given. Read KEY=VALUE lines from nx2_env.txt in the app directory instead (adb can push it).
+    // Release builds leave this out: they ship with the tested defaults only.
     if (FILE* file = std::fopen((directory + "/nx2_env.txt").c_str(), "r")) {
         char line[512];
         while (std::fgets(line, sizeof(line), file) != nullptr) {
@@ -788,6 +790,7 @@ void Java_org_yuzu_yuzu_1emu_NativeLibrary_setAppDirectory(JNIEnv* env, jobject 
         }
         std::fclose(file);
     }
+#endif
 }
 
 int Java_org_yuzu_yuzu_1emu_NativeLibrary_installFileToNand(JNIEnv* env, jobject instance,
