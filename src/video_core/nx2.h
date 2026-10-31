@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdlib>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -21,6 +22,13 @@ inline std::atomic<bool> g_nx2_ampere{false};
 
 // The running title, for the few places that must behave differently per game.
 inline std::atomic<u64> g_nx2_program_id{0};
+
+/// Parses a switch that is on unless NAME=0. Callers cache the result and also check
+/// g_nx2_ampere, so Switch 1 programs never see it on.
+[[nodiscard]] inline bool Nx2EnvDefaultOn(const char* name) {
+    const char* value = std::getenv(name);
+    return value == nullptr || value[0] != '0';
+}
 
 // Titles whose guest side reads GPU-written buffer data through a path the buffer cache does not
 // see, so their buffers must be copied back to guest memory at every fence

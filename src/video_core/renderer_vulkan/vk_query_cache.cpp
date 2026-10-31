@@ -19,6 +19,7 @@
 #include "common/common_types.h"
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/host1x/gpu_device_memory_manager.h"
+#include "video_core/nx2.h"
 #include "video_core/query_cache/query_cache.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/vk_buffer_cache.h"
@@ -170,10 +171,11 @@ public:
         if (has_started) {
             return;
         }
-        // EDEN_NX2_NO_OCCLUSION=1: record no host occlusion queries (diagnostics: DK Bananza
-        // crashed in vkCmdBeginQuery on Adreno). Sample counts then read as 0.
-        static const bool no_occlusion = std::getenv("EDEN_NX2_NO_OCCLUSION") != nullptr;
-        if (no_occlusion) {
+        // EDEN_NX2_NO_OCCLUSION (on by default for Switch 2 programs, =0 off): record no host
+        // occlusion queries (DK Bananza crashed in vkCmdBeginQuery on Adreno). Sample counts then
+        // read as 0.
+        static const bool no_occlusion = Tegra::Nx2EnvDefaultOn("EDEN_NX2_NO_OCCLUSION");
+        if (no_occlusion && Tegra::g_nx2_ampere.load(std::memory_order_relaxed)) {
             return;
         }
 
