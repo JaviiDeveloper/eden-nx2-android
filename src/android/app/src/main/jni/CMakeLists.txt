@@ -21,6 +21,11 @@ add_library(yuzu-android SHARED
     nx2_alloc_profile.cpp
 )
 
+# Release APKs ship the tested defaults only and don't read nx2_env.txt.
+if (EDEN_NX2_NO_ENV_FILE)
+    target_compile_definitions(yuzu-android PRIVATE EDEN_NX2_NO_ENV_FILE)
+endif()
+
 set_property(TARGET yuzu-android PROPERTY IMPORTED_LOCATION ${FFmpeg_LIBRARY_DIR})
 
 target_link_libraries(yuzu-android PRIVATE audio_core common core input_common frontend_common video_core)
