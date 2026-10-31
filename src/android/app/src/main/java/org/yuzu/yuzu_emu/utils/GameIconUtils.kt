@@ -42,6 +42,17 @@ class GameIconFetcher(
     private val options: Options
 ) : Fetcher {
     override suspend fun fetch(): FetchResult {
+        if (game.isLooseExeFS) {
+            return DrawableResult(
+                drawable = ResourcesCompat.getDrawable(
+                    options.context.resources,
+                    R.drawable.default_icon,
+                    null
+                )!!,
+                isSampled = false,
+                dataSource = DataSource.MEMORY
+            )
+        }
         return DrawableResult(
             drawable = decodeGameIcon(game)!!.toDrawable(options.context.resources),
             isSampled = false,
@@ -107,6 +118,9 @@ object GameIconUtils {
     }
 
     fun refreshGameIcon(game: Game) {
+        if (game.isLooseExeFS) {
+            return
+        }
         val targets = synchronized(gameIconTargets) {
             gameIconTargets
                 .filterValues { it.game.path == game.path && it.game.programId == game.programId }

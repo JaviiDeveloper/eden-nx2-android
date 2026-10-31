@@ -8,13 +8,18 @@ package org.yuzu.yuzu_emu.utils
 
 import android.content.SharedPreferences
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.provider.DocumentsContract
 import androidx.preference.PreferenceManager
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import org.yuzu.yuzu_emu.NativeLibrary
 import org.yuzu.yuzu_emu.YuzuApplication
+import org.yuzu.yuzu_emu.model.DirectoryType
 import org.yuzu.yuzu_emu.model.Game
 import org.yuzu.yuzu_emu.model.GameDir
 import org.yuzu.yuzu_emu.model.MinimalDocumentFile
@@ -69,6 +74,7 @@ object GameHelper {
                     scanDepth,
                     mountedContainerUris
                 )
+                addLibraryExeFSGames(games, gameDir)
             } else {
                 badDirs.add(index)
             }
@@ -96,6 +102,24 @@ object GameHelper {
 
         cachedGameList = games.toMutableList()
         return games.toList()
+    }
+
+    private fun addLibraryExeFSGames(games: MutableList<Game>, gameDir: GameDir) {
+        findLibraryExeFSGames(gameDir).forEach { game ->
+            val duplicate = games.any {
+                it.path == game.path ||
+                    (game.programId.isNotEmpty() && it.programId == game.programId)
+            }
+            if (duplicate) {
+                return@forEach
+            }
+            games.add(game)
+            if (preferences.getLong(game.keyAddedToLibraryTime, 0L) == 0L) {
+                preferences.edit {
+                    putLong(game.keyAddedToLibraryTime, System.currentTimeMillis())
+                }
+            }
+        }
     }
 
     fun restoreContentForGame(game: Game) {
@@ -256,6 +280,9 @@ object GameHelper {
     }
 
     private const val EXEFS_SEARCH_DEPTH = 4
+    private const val NPDM_MAX_SIZE = 1024 * 1024
+    private const val NPDM_MAGIC = 0x4154454D // "META"
+    private const val ACI0_MAGIC = 0x30494341 // "ACI0"
     private val exeFSSkippedDirs = setOf("romfs", "dlc")
     private val exeFSNonTitleDirs = setOf("exefs", "base", "updates")
 
@@ -264,21 +291,43 @@ object GameHelper {
     fun getExeFSGame(folder: File): Game? = findExeFSGames(folder).firstOrNull()
 
     // Searches a picked folder for exefs/main candidates, newest numbered update first.
-    fun findExeFSGames(folder: File): List<Game> {
+    fun findExeFSGames(folder: File, maxDepth: Int = EXEFS_SEARCH_DEPTH): List<Game> {
         val mains = mutableListOf<File>()
         File(folder, "main").takeIf { it.isFile }?.let { mains.add(it) }
-        collectExeFSMains(folder, 0, mains)
+        collectExeFSMains(folder, 0, maxDepth, mains)
 
         return mains.distinctBy { it.absolutePath }
             .sortedWith(
                 compareByDescending<File> { exeFSVersion(it) }
                     .thenBy { it.parentFile?.relativeTo(folder)?.path ?: "" }
             )
-            .map { Game(title = exeFSTitle(it, folder), path = it.absolutePath) }
+            .map {
+                Game(
+                    title = exeFSTitle(it, folder),
+                    path = it.absolutePath,
+                    programId = exeFSProgramId(it)
+                )
+            }
     }
 
-    private fun collectExeFSMains(dir: File, depth: Int, mains: MutableList<File>) {
-        if (depth >= EXEFS_SEARCH_DEPTH) {
+    // Loose ExeFS games need real paths, which only all files access can read.
+    fun hasAllFilesAccess(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+
+    // One library entry per loose ExeFS game in a game folder: its newest update, else base.
+    fun findLibraryExeFSGames(gameDir: GameDir): List<Game> {
+        if (gameDir.type != DirectoryType.GAME || !hasAllFilesAccess()) {
+            return emptyList()
+        }
+        val path = PathUtil.getPathFromUri(gameDir.uriString.toUri()) ?: return emptyList()
+        val maxDepth = if (gameDir.deepScan) EXEFS_SEARCH_DEPTH + 2 else EXEFS_SEARCH_DEPTH
+        return findExeFSGames(File(path), maxDepth).distinctBy {
+            if (it.programId.isEmpty()) it.title else it.programId
+        }
+    }
+
+    private fun collectExeFSMains(dir: File, depth: Int, maxDepth: Int, mains: MutableList<File>) {
+        if (depth >= maxDepth) {
             return
         }
         val children = dir.listFiles() ?: return
@@ -294,7 +343,7 @@ object GameHelper {
                 File(child, "main").takeIf { it.isFile }?.let { mains.add(it) }
                 continue
             }
-            collectExeFSMains(child, depth + 1, mains)
+            collectExeFSMains(child, depth + 1, maxDepth, mains)
         }
     }
 
@@ -305,6 +354,30 @@ object GameHelper {
             resolved.canonicalFile != resolved.absoluteFile
         } catch (_: Exception) {
             true
+        }
+    }
+
+    // Title ID from the ACI0 section of exefs/main.npdm, as a decimal string like GameMetadata.
+    private fun exeFSProgramId(main: File): String {
+        val npdm = File(main.parentFile, "main.npdm")
+        return try {
+            if (!npdm.isFile || npdm.length() > NPDM_MAX_SIZE) {
+                return ""
+            }
+            val buffer = ByteBuffer.wrap(npdm.readBytes()).order(ByteOrder.LITTLE_ENDIAN)
+            if (buffer.limit() < 0x80 || buffer.getInt(0) != NPDM_MAGIC) {
+                return ""
+            }
+            val aciOffset = buffer.getInt(0x70)
+            if (aciOffset < 0 || aciOffset + 0x18 > buffer.limit() ||
+                buffer.getInt(aciOffset) != ACI0_MAGIC
+            ) {
+                return ""
+            }
+            val programId = buffer.getLong(aciOffset + 0x10)
+            if (programId == 0L) "" else java.lang.Long.toUnsignedString(programId)
+        } catch (_: Exception) {
+            ""
         }
     }
 
