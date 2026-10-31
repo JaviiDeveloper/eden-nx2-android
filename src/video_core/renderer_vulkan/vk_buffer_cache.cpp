@@ -32,6 +32,14 @@ VkBufferCopy MakeBufferCopy(const VideoCommon::BufferCopy& copy) {
     };
 }
 
+// Unmapped or empty texture buffers are bound with PixelFormat::Invalid; any buffer format will
+// do for their (null) views.
+VideoCore::Surface::PixelFormat TexelViewFormat(VideoCore::Surface::PixelFormat format) {
+    return format == VideoCore::Surface::PixelFormat::Invalid
+               ? VideoCore::Surface::PixelFormat::R8_UNORM
+               : format;
+}
+
 VkIndexType IndexTypeFromNumElements(const Device& device, u32 num_elements) {
     if (num_elements <= 0xff && device.IsExtIndexTypeUint8Supported()) {
         return VK_INDEX_TYPE_UINT8_EXT;
@@ -148,7 +156,8 @@ VkBufferView Buffer::View(u32 offset, u32 size, VideoCore::Surface::PixelFormat 
             .pNext = nullptr,
             .flags = 0,
             .buffer = *buffer,
-            .format = MaxwellToVK::SurfaceFormat(*device, FormatType::Buffer, false, format).format,
+            .format = MaxwellToVK::SurfaceFormat(*device, FormatType::Buffer, false,
+                                                 TexelViewFormat(format)).format,
             .offset = offset,
             .range = size,
         }),
@@ -387,7 +396,8 @@ StagingBufferRef BufferCacheRuntime::DownloadStagingBuffer(size_t size, bool def
 }
 
 VkFormat BufferCacheRuntime::TexelBufferFormat(VideoCore::Surface::PixelFormat format) const {
-    return MaxwellToVK::SurfaceFormat(device, FormatType::Buffer, false, format).format;
+    return MaxwellToVK::SurfaceFormat(device, FormatType::Buffer, false, TexelViewFormat(format))
+        .format;
 }
 
 void BufferCacheRuntime::FreeDeferredStagingBuffer(StagingBufferRef& ref) {
