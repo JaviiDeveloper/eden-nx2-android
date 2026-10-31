@@ -17,6 +17,7 @@
 #include "common/assert.h"
 #include "common/logging.h"
 #include "shader_recompiler/exception.h"
+#include "shader_recompiler/frontend/ampere/program_capture.h"
 #include "core/core.h"
 #include "video_core/gpu_split.h"
 #include "video_core/nx2_profile.h"
@@ -587,6 +588,42 @@ void KeplerCompute::DescribeNativeResources(const NativeQmdScheduler::Descriptor
     }
 }
 
+// The texture and surface instructions of a native program with a direct descriptor (constant
+// buffer at bits 54-58, handle word offset at 40-53), so a substitute can find its images.
+const std::vector<KeplerCompute::NativeImageReference>& KeplerCompute::NativeImageReferences(
+    GPUVAddr program) {
+    const auto [it, inserted] = native_image_references.try_emplace(program);
+    if (!inserted) return it->second;
+    using Shader::Ampere::Instruction;
+    Shader::Ampere::ProgramCaptureState capture;
+    for (u32 index = 0; index < Shader::Ampere::ProgramCaptureState::MaximumInstructions; ++index) {
+        const GPUVAddr address = program + index * sizeof(Instruction);
+        if (!memory_manager.IsFullyMappedRange(address, sizeof(Instruction))) break;
+        Instruction insn;
+        memory_manager.ReadBlockUnsafe(address, &insn, sizeof(insn));
+        switch (insn.Bits(0, 12)) {
+        case 0xb60: // TEX
+        case 0xb63: // TLD4
+        case 0xb66: // TLD
+        case 0xb6c: // TXD
+        case 0xb97: // SULD
+        case 0xb9b: { // SUST
+            const NativeImageReference ref{insn.Bits(54, 5), insn.Bits(40, 14), insn.Bits(0, 12) == 0xb9b};
+            if (std::ranges::none_of(it->second, [&](const NativeImageReference& other) {
+                    return other.binding == ref.binding && other.offset == ref.offset && other.store == ref.store;
+                })) {
+                it->second.push_back(ref);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+        if (capture.Observe(insn, index) != Shader::Ampere::ProgramCaptureState::Result::Continue) break;
+    }
+    return it->second;
+}
+
 std::atomic<u32> g_nx2_trace_draws_after_upscale{};
 
 // Title 4's upscaler reads the tonemapped frame through the texture handle at cbuf0+0x90 and
@@ -619,39 +656,131 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
             return std::nullopt;
         return tic;
     };
-    std::optional<Texture::TICEntry> input = usable(0x90), output = usable(0xa0);
-    u32 input_offset = 0x90, output_offset = 0xa0;
-    if (!input || !output || output->Width() <= input->Width()) {
-        // Otherwise (DKB, whose handles move between dispatches) the output is the largest image
-        // and the input the largest smaller one with the same aspect ratio.
-        input.reset(), output.reset();
-        const auto area = [](const Texture::TICEntry& tic) { return u64{tic.Width()} * tic.Height(); };
-        for (u32 offset = 0x80; offset < 0x120; offset += 4) {
-            if (const auto tic = usable(offset); tic && (!output || area(*tic) > area(*output))) {
-                output = tic, output_offset = offset;
-            }
+    const GPUVAddr program = regs.code_loc.Address();
+    const auto area = [](const Texture::TICEntry& tic) { return u64{tic.Width()} * tic.Height(); };
+    // DKB's second program (0x2116182900) runs at a dynamic input resolution: cbuf0+0x18/0x1c
+    // hold the rendered input extent (1396x785) and +0x28/0x2c the output extent minus one
+    // (1919x1079). Only trusted when the latter matches the chosen output.
+    const u32 crop_width = memory_manager.Read<u32>(cbuf_address + 0x18);
+    const u32 crop_height = memory_manager.Read<u32>(cbuf_address + 0x1c);
+    const u32 output_last_x = memory_manager.Read<u32>(cbuf_address + 0x28);
+    const u32 output_last_y = memory_manager.Read<u32>(cbuf_address + 0x2c);
+    const auto input_extent = [&](const Texture::TICEntry& tic, const Texture::TICEntry& out) {
+        if (output_last_x + 1 == out.Width() && output_last_y + 1 == out.Height() && crop_width &&
+            crop_height && crop_width <= tic.Width() && crop_height <= tic.Height()) {
+            return std::pair{crop_width, crop_height};
         }
-        for (u32 offset = 0x80; output && offset < 0x120; offset += 4) {
-            const auto tic = usable(offset);
-            if (!tic || tic->Width() >= output->Width() || tic->Height() >= output->Height()) continue;
-            const u64 cross = u64{tic->Width()} * output->Height();
-            const u64 expected = u64{output->Width()} * tic->Height();
-            if ((cross > expected ? cross - expected : expected - cross) * 50 > expected) continue;
-            if (!input || area(*tic) > area(*input)) input = tic, input_offset = offset;
+        return std::pair{tic.Width(), tic.Height()};
+    };
+    // An input fits when its (cropped) extent is smaller than the output with the same aspect
+    // ratio, within 5%.
+    const auto fits = [&](const Texture::TICEntry& tic, const Texture::TICEntry& out) {
+        const auto [width, height] = input_extent(tic, out);
+        if (width > out.Width() || height > out.Height() || u64{width} * height >= area(out))
+            return false;
+        const u64 cross = u64{width} * out.Height();
+        const u64 expected = u64{out.Width()} * height;
+        return (cross > expected ? cross - expected : expected - cross) * 20 <= expected;
+    };
+    std::optional<Texture::TICEntry> input, output;
+    u32 input_offset{}, output_offset{};
+    const char* source = "program";
+    // First the images the program itself samples and stores to (its direct-descriptor texture
+    // and surface instructions name the constant buffer and word holding each handle).
+    const auto& references = NativeImageReferences(program);
+    const auto resolve = [&](const NativeImageReference& ref) -> std::optional<Texture::TICEntry> {
+        if (ref.binding >= NumConstBuffers ||
+            !((launch_description.const_buffer_enable_mask.Value() >> ref.binding) & 1))
+            return std::nullopt;
+        const auto& config = launch_description.const_buffer_config[ref.binding];
+        if (ref.offset * 4U >= config.size.Value()) return std::nullopt;
+        const GPUVAddr base = (GPUVAddr{config.address_high} << 32) | config.address_low;
+        const u32 handle = memory_manager.Read<u32>(base + ref.offset * 4U);
+        const u32 tic_index = handle & 0xfffff;
+        if (handle == 0 || tic_index > regs.tic.limit) return std::nullopt;
+        const auto tic = GetTICEntry(tic_index);
+        using Type = Texture::TextureType;
+        const Type type = tic.texture_type.Value();
+        if (tic.Address() == 0 || !tic.IsBlockLinear() || !render_format(tic.format) ||
+            (type != Type::Texture2D && type != Type::Texture2DNoMipmap && type != Type::Texture2DArray))
+            return std::nullopt;
+        return tic;
+    };
+    const auto packed = [](const NativeImageReference& ref) { return ref.binding << 16 | ref.offset * 4U; };
+    for (const auto& ref : references) {
+        if (!ref.store) continue;
+        if (const auto tic = resolve(ref); tic && (!output || area(*tic) > area(*output))) {
+            output = tic, output_offset = packed(ref);
+        }
+    }
+    for (const auto& ref : references) {
+        if (ref.store || !output) continue;
+        const auto tic = resolve(ref);
+        if (!tic || tic->Address() == output->Address() || !fits(*tic, *output)) continue;
+        if (!input || area(*tic) > area(*input)) input = tic, input_offset = packed(ref);
+    }
+    if (!input) {
+        input = usable(0x90), output = usable(0xa0);
+        input_offset = 0x90, output_offset = 0xa0;
+        source = "cbuf0";
+        if (!input || !output || output->Width() <= input->Width()) {
+            // Otherwise (DKB, whose handles move between dispatches) the output is the largest image
+            // and the input the largest smaller one with the same aspect ratio.
+            input.reset(), output.reset();
+            for (u32 offset = 0x80; offset < 0x120; offset += 4) {
+                if (const auto tic = usable(offset); tic && (!output || area(*tic) > area(*output))) {
+                    output = tic, output_offset = offset;
+                }
+            }
+            for (u32 offset = 0x80; output && offset < 0x120; offset += 4) {
+                const auto tic = usable(offset);
+                if (!tic || tic->Address() == output->Address() || !fits(*tic, *output)) continue;
+                if (!input || area(*tic) > area(*input)) input = tic, input_offset = offset;
+            }
         }
     }
     if (!input) {
-        static bool logged_failure{};
-        if (!std::exchange(logged_failure, true)) {
-            LOG_INFO(HW_GPU, "Upscale fallback: no plain 2D colour input/output pair in cbuf0 handles");
+        // Skip the dispatch (its QMD still completes): the output keeps its last contents.
+        static u32 failures{};
+        if (failures++ < 3) {
+            LOG_WARNING(HW_GPU, "Upscale fallback: no input/output pair for program {:#x} ({} image "
+                        "instructions), skipping its dispatch", program, references.size());
+            const auto describe = [&](std::string_view where, u32 handle) {
+                const u32 tic_index = handle & 0xfffff;
+                if (handle == 0 || tic_index > regs.tic.limit) return;
+                const auto tic = GetTICEntry(tic_index);
+                LOG_INFO(HW_GPU, "  {} handle {:#x}: tic {} address {:#x} {}x{}x{} format {:#x} type {} "
+                         "{}, layer {}", where, handle, tic_index, tic.Address(), tic.Width(), tic.Height(),
+                         tic.Depth(), static_cast<u32>(tic.format.Value()),
+                         static_cast<u32>(tic.texture_type.Value()),
+                         tic.IsBlockLinear() ? "block linear" : "pitch", tic.BaseLayer());
+            };
+            for (const auto& ref : references) {
+                const auto& config = launch_description.const_buffer_config[ref.binding % NumConstBuffers];
+                const GPUVAddr base = (GPUVAddr{config.address_high} << 32) | config.address_low;
+                const auto where = fmt::format("{} cbuf{}+{:#x}", ref.store ? "store" : "read", ref.binding,
+                                               ref.offset * 4U);
+                const u32 handle = ref.binding < NumConstBuffers && ref.offset * 4U < config.size.Value()
+                                       ? memory_manager.Read<u32>(base + ref.offset * 4U) : 0;
+                LOG_INFO(HW_GPU, "  {} = {:#x}", where, handle);
+                describe(where, handle);
+            }
+            for (u32 offset = 0; offset < 0x120; offset += 4) {
+                const u32 word = memory_manager.Read<u32>(cbuf_address + offset);
+                if (word != 0) LOG_INFO(HW_GPU, "  cbuf0+{:#x} = {:#x}", offset, word);
+                if (offset >= 0x80) describe(fmt::format("cbuf0+{:#x}", offset), word);
+            }
         }
-        return false;
+        return true;
     }
-    if (static bool logged_pair{}; !std::exchange(logged_pair, true)) {
-        LOG_INFO(HW_GPU, "Upscale fallback: cbuf0 {:#x} -> {:#x}, format {:#x} -> {:#x}", input_offset,
-                 output_offset, static_cast<u32>(input->format.Value()),
-                 static_cast<u32>(output->format.Value()));
+    if (static std::unordered_set<GPUVAddr> logged_pairs; logged_pairs.insert(program).second) {
+        const auto [width, height] = input_extent(*input, *output);
+        LOG_INFO(HW_GPU, "Upscale fallback: program {:#x} {} {:#x} -> {:#x}, format {:#x} -> {:#x}, "
+                 "input {}x{} of {}x{}", program, source, input_offset, output_offset,
+                 static_cast<u32>(input->format.Value()), static_cast<u32>(output->format.Value()),
+                 width, height, input->Width(), input->Height());
     }
+    const auto [input_width, input_height] = input_extent(*input, *output);
     const RTFormat input_format = *render_format(input->format);
     const RTFormat output_format = *render_format(output->format);
     const auto surface = [&](const Texture::TICEntry& tic, RTFormat format) {
@@ -678,8 +807,8 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
         .dst_y1 = static_cast<s32>(output->Height()),
         .src_x0 = 0,
         .src_y0 = 0,
-        .src_x1 = static_cast<s32>(input->Width()),
-        .src_y1 = static_cast<s32>(input->Height()),
+        .src_x1 = static_cast<s32>(input_width),
+        .src_y1 = static_cast<s32>(input_height),
     };
     // Debug: does the input hold anything? Download it once and count non-zero words.
     static const u32 sample_at = [] {

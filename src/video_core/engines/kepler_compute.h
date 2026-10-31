@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <vector>
 #include "common/bit_field.h"
 #include "common/common_funcs.h"
@@ -267,6 +268,13 @@ private:
     void ProcessNativeReportSemaphore(u32 argument);
     void DescribeNativeResources(const NativeQmdScheduler::Descriptor& qmd);
     bool UpscaleInsteadOfNativeProgram();
+    struct NativeImageReference {
+        u32 binding; ///< Constant buffer holding the handle
+        u32 offset;  ///< Handle's word offset in it
+        bool store;
+    };
+    const std::vector<NativeImageReference>& NativeImageReferences(GPUVAddr program);
+    std::unordered_map<GPUVAddr, std::vector<NativeImageReference>> native_image_references;
     bool ProcessNativeMethod(Core::System& system, u32 method, u32 argument, bool is_last_call);
     NativeQmdScheduler native_qmd;
     std::array<u32, 0xc00>* native_data_ram{};
