@@ -399,6 +399,15 @@ void PresentManager::DiscardFrame(Frame* frame) {
 void PresentManager::CopyToSwapchain(Frame* frame) {
     bool requires_recreation = false;
 
+#ifdef __ANDROID__
+    // The app is in the background or closing and its surface is gone: drop the frame until a
+    // new surface arrives.
+    if (render_window.GetWindowInfo().render_surface == nullptr) {
+        DiscardFrame(frame);
+        return;
+    }
+#endif
+
     for (u32 attempt = 0; attempt < MAX_PRESENT_ATTEMPTS; ++attempt) {
         try {
             // Recreate surface and swapchain if needed.
@@ -412,9 +421,17 @@ void PresentManager::CopyToSwapchain(Frame* frame) {
             // Draw to swapchain.
             return CopyToSwapchainImpl(frame);
         } catch (const vk::Exception& except) {
+#ifdef __ANDROID__
+            // Recreating against a window that is being destroyed fails with other errors too
+            // (VK_ERROR_INITIALIZATION_FAILED from CreateSurface): retry, then drop the frame.
+            if (except.GetResult() != VK_ERROR_SURFACE_LOST_KHR && !requires_recreation) {
+                throw;
+            }
+#else
             if (except.GetResult() != VK_ERROR_SURFACE_LOST_KHR) {
                 throw;
             }
+#endif
 
             requires_recreation = true;
         }
