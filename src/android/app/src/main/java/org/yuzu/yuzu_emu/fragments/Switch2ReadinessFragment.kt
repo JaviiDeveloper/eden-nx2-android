@@ -26,7 +26,6 @@ import com.google.android.material.R as MaterialR
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.transition.MaterialSharedAxis
 import java.io.File
-import kotlin.math.ceil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -175,13 +174,14 @@ class Switch2ReadinessFragment : Fragment() {
 
     private fun Context.checkMemory(): Check {
         val ram = MemoryUtil.getDeviceRAM()
-        // Rounded up like getDeviceRAM(), since totalMem excludes memory reserved by the kernel.
-        val gigabytes = ceil(MemoryUtil.totalMemory / MemoryUtil.Gb).toInt()
+        // totalMem excludes memory the firmware and kernel reserve: 16 GB phones report about
+        // 14.5-15.5 GiB and 12 GB phones about 10.5-11.5 GiB.
+        val gigabytes = MemoryUtil.totalMemory / MemoryUtil.Gb
         return when {
-            gigabytes >= 16 ->
+            gigabytes >= 14f ->
                 check(R.string.readiness_ram, Status.PASS, R.string.readiness_ram_ok, ram)
 
-            gigabytes >= 12 ->
+            gigabytes >= 10f ->
                 check(R.string.readiness_ram, Status.WARNING, R.string.readiness_ram_low, ram)
 
             else -> check(R.string.readiness_ram, Status.FAIL, R.string.readiness_ram_too_low, ram)
