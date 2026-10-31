@@ -2411,6 +2411,21 @@ ImageViewId TextureCache<P>::FindDepthBuffer() {
 
 template <class P>
 ImageViewId TextureCache<P>::FindRenderTargetView(const ImageInfo& info, GPUVAddr gpu_addr) {
+    // A garbage command stream can bind render targets no host can create (creating the image
+    // throws on the GPU thread). Leave such a target unbound, so its draws write nothing.
+    constexpr u32 max_dimension = 16384;
+    constexpr u32 max_layers = 2048;
+    if (info.size.width > max_dimension || info.size.height > max_dimension ||
+        info.size.depth > max_layers || info.resources.layers > max_layers) {
+        static bool reported{};
+        if (!reported) {
+            reported = true;
+            LOG_ERROR(HW_GPU, "Ignoring render target at {:#x}: {}x{}x{}, {} layers, format {}",
+                      gpu_addr, info.size.width, info.size.height, info.size.depth,
+                      info.resources.layers, static_cast<u32>(info.format));
+        }
+        return ImageViewId{};
+    }
     ImageId image_id{};
     bool delete_state = has_deleted_images;
     do {
