@@ -684,7 +684,7 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
     };
     std::optional<Texture::TICEntry> input, output;
     u32 input_offset{}, output_offset{};
-    const char* source = "program";
+    const char* pair_source = "program";
     // First the images the program itself samples and stores to (its direct-descriptor texture
     // and surface instructions name the constant buffer and word holding each handle).
     const auto& references = NativeImageReferences(program);
@@ -722,7 +722,7 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
     if (!input) {
         input = usable(0x90), output = usable(0xa0);
         input_offset = 0x90, output_offset = 0xa0;
-        source = "cbuf0";
+        pair_source = "cbuf0";
         if (!input || !output || output->Width() <= input->Width()) {
             // Otherwise (DKB, whose handles move between dispatches) the output is the largest image
             // and the input the largest smaller one with the same aspect ratio.
@@ -776,7 +776,7 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
     if (static std::unordered_set<GPUVAddr> logged_pairs; logged_pairs.insert(program).second) {
         const auto [width, height] = input_extent(*input, *output);
         LOG_INFO(HW_GPU, "Upscale fallback: program {:#x} {} {:#x} -> {:#x}, format {:#x} -> {:#x}, "
-                 "input {}x{} of {}x{}", program, source, input_offset, output_offset,
+                 "input {}x{} of {}x{}", program, pair_source, input_offset, output_offset,
                  static_cast<u32>(input->format.Value()), static_cast<u32>(output->format.Value()),
                  width, height, input->Width(), input->Height());
     }
