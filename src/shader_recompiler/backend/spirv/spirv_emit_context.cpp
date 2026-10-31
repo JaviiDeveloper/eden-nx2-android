@@ -890,10 +890,15 @@ void EmitContext::DefineAttributeMemAccess(const Info& info) {
 }
 
 void EmitContext::DefineWriteStorageCasLoopFunction(const Info& info) {
-    if (profile.support_int8 && profile.support_int16) {
-        return;
-    }
-    if (!info.uses_int8 && !info.uses_int16) {
+    // Must match the fallback conditions in EmitWriteStorage{U,S}{8,16}
+    const bool native_8bit{profile.support_int8 && profile.support_storage_buffer_8bit &&
+                           profile.support_descriptor_aliasing};
+    const bool native_16bit{profile.support_int16 && profile.support_storage_buffer_16bit &&
+                            profile.support_descriptor_aliasing};
+    const bool emulates_8bit{!native_8bit && True(info.used_storage_buffer_types & IR::Type::U8)};
+    const bool emulates_16bit{!native_16bit &&
+                              True(info.used_storage_buffer_types & IR::Type::U16)};
+    if (!emulates_8bit && !emulates_16bit) {
         return;
     }
 
