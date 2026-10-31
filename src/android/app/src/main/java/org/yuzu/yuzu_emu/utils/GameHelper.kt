@@ -255,13 +255,79 @@ object GameHelper {
         }
     }
 
+    private const val EXEFS_SEARCH_DEPTH = 4
+    private val exeFSSkippedDirs = setOf("romfs", "dlc")
+    private val exeFSNonTitleDirs = setOf("exefs", "base", "updates")
+
     // Loose ExeFS titles (Switch 2) boot from exefs/main by real path. Accepts the game folder
     // (containing exefs/) or the exefs folder itself.
-    fun getExeFSGame(folder: File): Game? {
-        val main = listOf(File(folder, "exefs/main"), File(folder, "main")).firstOrNull { it.isFile }
-            ?: return null
-        val gameFolder = if (main.parentFile == folder) folder.parentFile ?: folder else folder
-        return Game(title = gameFolder.name, path = main.absolutePath)
+    fun getExeFSGame(folder: File): Game? = findExeFSGames(folder).firstOrNull()
+
+    // Searches a picked folder for exefs/main candidates, newest numbered update first.
+    fun findExeFSGames(folder: File): List<Game> {
+        val mains = mutableListOf<File>()
+        File(folder, "main").takeIf { it.isFile }?.let { mains.add(it) }
+        collectExeFSMains(folder, 0, mains)
+
+        return mains.distinctBy { it.absolutePath }
+            .sortedWith(
+                compareByDescending<File> { exeFSVersion(it) }
+                    .thenBy { it.parentFile?.relativeTo(folder)?.path ?: "" }
+            )
+            .map { Game(title = exeFSTitle(it, folder), path = it.absolutePath) }
+    }
+
+    private fun collectExeFSMains(dir: File, depth: Int, mains: MutableList<File>) {
+        if (depth >= EXEFS_SEARCH_DEPTH) {
+            return
+        }
+        val children = dir.listFiles() ?: return
+        for (child in children) {
+            if (!child.isDirectory || isSymlink(child)) {
+                continue
+            }
+            val name = child.name.lowercase()
+            if (name in exeFSSkippedDirs) {
+                continue
+            }
+            if (name == "exefs") {
+                File(child, "main").takeIf { it.isFile }?.let { mains.add(it) }
+                continue
+            }
+            collectExeFSMains(child, depth + 1, mains)
+        }
+    }
+
+    private fun isSymlink(file: File): Boolean {
+        return try {
+            val parent = file.parentFile?.canonicalFile ?: return false
+            val resolved = File(parent, file.name)
+            resolved.canonicalFile != resolved.absoluteFile
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    private fun exeFSVersion(main: File): Long {
+        var dir = main.parentFile ?: return -1
+        if (dir.name.equals("exefs", true)) {
+            dir = dir.parentFile ?: return -1
+        }
+        return dir.name.toLongOrNull() ?: -1
+    }
+
+    private fun exeFSTitle(main: File, folder: File): String {
+        var dir = main.parentFile
+        while (dir != null) {
+            val name = dir.name
+            if (name.isNotEmpty() && name.lowercase() !in exeFSNonTitleDirs &&
+                name.toLongOrNull() == null
+            ) {
+                return name
+            }
+            dir = dir.parentFile
+        }
+        return folder.name
     }
 
     fun getGame(

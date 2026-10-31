@@ -460,7 +460,8 @@
 
     <!-- Loose ExeFS (Switch 2) launch strings -->
     <string name="launch_exefs_folder">Launch ExeFS game folder</string>
-    <string name="exefs_folder_no_main">No exefs/main found in the selected folder</string>
+    <string name="exefs_folder_no_main">No exefs/main found in the selected folder or its subfolders</string>
+    <string name="exefs_folder_choose">Choose which ExeFS to launch</string>
     <string name="exefs_folder_bad_path">Could not resolve the selected folder to a storage path</string>
     <string name="exefs_folder_needs_permission">Grant all files access, then select the folder again</string>
 

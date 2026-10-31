@@ -33,6 +33,7 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.yuzu.yuzu_emu.HomeNavigationDirections
 import org.yuzu.yuzu_emu.NativeLibrary
 import org.yuzu.yuzu_emu.R
@@ -136,13 +137,32 @@ class GamesFragment : Fragment() {
             return
         }
 
-        val game = GameHelper.getExeFSGame(File(path))
-        if (game == null) {
-            Toast.makeText(requireContext(), R.string.exefs_folder_no_main, Toast.LENGTH_LONG)
-                .show()
-            return
-        }
+        val folder = File(path)
+        val games = GameHelper.findExeFSGames(folder)
+        when (games.size) {
+            0 -> Toast.makeText(
+                requireContext(),
+                R.string.exefs_folder_no_main,
+                Toast.LENGTH_LONG
+            ).show()
 
+            1 -> launchExeFSGame(games[0])
+
+            else -> {
+                val labels = games.map { game ->
+                    val dir = File(game.path).parentFile?.relativeTo(folder)?.path
+                    if (dir.isNullOrEmpty()) folder.name else dir
+                }.toTypedArray()
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(R.string.exefs_folder_choose)
+                    .setItems(labels) { _, which -> launchExeFSGame(games[which]) }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+            }
+        }
+    }
+
+    private fun launchExeFSGame(game: Game) {
         findNavController().navigate(HomeNavigationDirections.actionGlobalEmulationActivity(game))
     }
 
