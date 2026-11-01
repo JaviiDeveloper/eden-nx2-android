@@ -110,7 +110,7 @@ void Dump() {
     }
     const char* path = std::getenv("EDEN_NX2_ALLOC_PROFILE");
     if (path == nullptr || path[0] != '/') {
-        path = "/sdcard/Android/data/dev.eden.eden_emulator.relWithDebInfo/files/alloc_profile.txt";
+        path = "/sdcard/Android/data/dev.eden.nx2.relWithDebInfo/files/alloc_profile.txt";
     }
     const int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
     if (fd < 0) {

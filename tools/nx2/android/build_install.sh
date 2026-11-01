@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the RelWithDebInfo APK and installs it for the main user only (never user 11 or 100).
+# Builds the RelWithDebInfo APK and installs it for the main user only.
 set -e
 . "$(dirname "$0")/env.sh"
 cd "$REPO"
