@@ -74,6 +74,8 @@ add_library(core STATIC
     file_sys/fsa/fs_i_filesystem.h
     file_sys/fsmitm_romfsbuild.cpp
     file_sys/fsmitm_romfsbuild.h
+    file_sys/nup.cpp
+    file_sys/nup.h
     file_sys/fssrv/fssrv_sf_path.h
     file_sys/fssystem/fs_i_storage.h
     file_sys/fssystem/fs_types.h
@@ -1154,6 +1156,8 @@ add_library(core STATIC
     loader/nso.h
     loader/nsp.cpp
     loader/nsp.h
+    loader/nup.cpp
+    loader/nup.h
     loader/xci.cpp
     loader/xci.h
     memory.cpp
