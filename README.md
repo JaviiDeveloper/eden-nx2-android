@@ -81,7 +81,11 @@ It checks your phone and shows what is missing:
 Most items have a **button** that takes you to the right place to fix it. Tap **Run again** after you fix something.
 
 It checks: Android version, RAM, graphics chip and driver, settings, All files access, if games were found, free space,
-battery setting, and if Android closed the app to free memory in the last 7 days.
+battery setting, how the app ended last time (closed normally, out of memory, crashed or stopped responding), and if
+Android closed the app to free memory in the last 7 days.
+
+**Share report** (bottom left) makes one file with your phone details, the check results and the app's logs. Send that
+file when you report a problem.
 
 ## Which games work
 
@@ -120,8 +124,8 @@ Tested on one phone (Snapdragon SM8850, 16 GB RAM).
 
 **Switching to another game.** Close Eden SX2A first (swipe it away from recent apps), then open it again.
 
-**Still stuck?** Share the file `Android/data/dev.eden.nx2/files/log/eden_log.txt`, your phone model, and how much RAM
-it has.
+**Still stuck?** Open the readiness check, tap **Share report**, and send the file. It has your phone model, RAM and
+the logs. Do it right after the problem, before you start a game again.
 
 ## Known problems
 
