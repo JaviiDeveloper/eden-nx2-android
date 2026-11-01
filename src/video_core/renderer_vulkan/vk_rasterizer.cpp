@@ -1282,10 +1282,9 @@ void RasterizerVulkan::WaitForIdle() {
 
     query_cache.NotifyWFI();
 
+    bool needs_memory_barrier = false;
 #ifdef _WIN32
-    const bool needs_memory_barrier = device.GetDriverID() == VK_DRIVER_ID_AMD_PROPRIETARY;
-#else
-    const bool needs_memory_barrier = false;
+    needs_memory_barrier = device.GetDriverID() == VK_DRIVER_ID_AMD_PROPRIETARY;
 #endif
     scheduler.RequestOutsideRenderPassOperationContext();
     scheduler.Record([event = *wfi_event, flags, needs_memory_barrier](vk::CommandBuffer cmdbuf) {
