@@ -131,6 +131,7 @@ the logs. Do it right after the problem, before you start a game again.
 ## Known problems
 
 - This version is new. Expect bugs.
+- Games run slowly. Some have black or missing textures.
 - The first start of a game is slow. Later starts are faster.
 - The phone's own graphics driver (not the bundled one) misses some graphics. Use the bundled driver.
 - Videos in games can be slow.
