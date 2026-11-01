@@ -956,6 +956,9 @@ private:
 
     void ApplySparseMapRequest(const SparseMapRequest& request) {
         ++m_tile_requests;
+        if (request.size == 0) {
+            return;
+        }
         const u64 gpu_address = request.gpu_address;
         const u64 size = request.size;
         auto& registry = Nvidia::Devices::Nx2GpuMemoryRegistry::Get();
@@ -987,7 +990,7 @@ private:
         }
         ++m_tile_maps;
         const auto memory = m_memory.find(request.memory_handle);
-        if (memory == m_memory.end() || request.offset + size > memory->second.size) {
+        if (memory == m_memory.end() || request.offset > memory->second.size || size > memory->second.size - request.offset) {
             LOG_WARNING(Service, "nx2:gpu 216 map [{:#x}, +{:#x}] of unknown memory {} offset {:#x}",
                         gpu_address, size, request.memory_handle, request.offset);
             return;
@@ -1065,7 +1068,7 @@ private:
             return;
         }
         const auto memory = m_memory.find(request.memory_handle);
-        if (memory == m_memory.end() || request.offset + size > memory->second.size) {
+        if (memory == m_memory.end() || request.offset > memory->second.size || size > memory->second.size - request.offset) {
             LOG_WARNING(Service, "nx2:gpu 216 map [{:#x}, +{:#x}] of unknown memory {} offset {:#x}",
                         gpu_address, size, request.memory_handle, request.offset);
             return;
