@@ -293,7 +293,17 @@ object GameHelper {
     // Searches a picked folder for exefs/main candidates, newest numbered update first.
     fun findExeFSGames(folder: File, maxDepth: Int = EXEFS_SEARCH_DEPTH): List<Game> {
         val mains = mutableListOf<File>()
+
+        // Check if folder itself is an exefs folder
         File(folder, "main").takeIf { it.isFile }?.let { mains.add(it) }
+
+        // Check direct child folders
+        val exefsFolder = File(folder, "exefs")
+        if (exefsFolder.isDirectory) {
+            File(exefsFolder, "main").takeIf { it.isFile }?.let { mains.add(it) }
+        }
+
+        // Recursively search subdirectories
         collectExeFSMains(folder, 0, maxDepth, mains)
 
         return mains.distinctBy { it.absolutePath }
@@ -320,8 +330,12 @@ object GameHelper {
             return emptyList()
         }
         val path = PathUtil.getPathFromUri(gameDir.uriString.toUri()) ?: return emptyList()
+        val folder = File(path)
+        if (!folder.exists() || !folder.isDirectory) {
+            return emptyList()
+        }
         val maxDepth = if (gameDir.deepScan) EXEFS_SEARCH_DEPTH + 2 else EXEFS_SEARCH_DEPTH
-        return findExeFSGames(File(path), maxDepth).distinctBy {
+        return findExeFSGames(folder, maxDepth).distinctBy {
             if (it.programId.isEmpty()) it.title else it.programId
         }
     }
@@ -336,11 +350,13 @@ object GameHelper {
                 continue
             }
             val name = child.name.lowercase()
-            if (name in exeFSSkippedDirs) {
+            if (name in exeFSSkippedDirs && depth > 0) {
                 continue
             }
             if (name == "exefs") {
                 File(child, "main").takeIf { it.isFile }?.let { mains.add(it) }
+                // Also scan inside exefs for update folders
+                collectExeFSMains(child, depth + 1, maxDepth, mains)
                 continue
             }
             collectExeFSMains(child, depth + 1, maxDepth, mains)
