@@ -973,6 +973,8 @@ public:
             // in an 18 minute session).
             {104, &INx2Vi2Session::SucceedQuietly, "Unknown104 (display \"default\")"},
             {105, &INx2Vi2Session::SucceedQuietly, "Unknown105 (display \"default\")"},
+            // DK Bananza calls this one every frame, same display-name request shape.
+            {107, &INx2Vi2Session::SucceedQuietly, "Unknown107 (display \"default\")"},
             // Display/client setup (title 2): nothing to track while presents composite directly.
             {51, &INx2Vi2Session::SucceedQuietly, "ConfigureRequestGroups"},
             {101, &INx2Vi2Session::OpenDisplay, "OpenDisplay"},
