@@ -10,6 +10,8 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -529,11 +531,13 @@ class Switch2ReadinessFragment : Fragment() {
         }
         text.appendLine(
             "RAM: ${MemoryUtil.bytesToSizeUnit(memoryInfo.totalMem.toFloat())} total, " +
-                "${MemoryUtil.bytesToSizeUnit(memoryInfo.availMem.toFloat())} free now" +
-                if (memoryInfo.lowMemory) " (low)" else ""
+                "${MemoryUtil.bytesToSizeUnit(memoryInfo.availMem.toFloat())} available now, " +
+                "low below ${MemoryUtil.bytesToSizeUnit(memoryInfo.threshold.toFloat())}" +
+                if (memoryInfo.lowMemory) " (low now)" else ""
         )
         val driverPath = StringSetting.DRIVER_PATH.getString(needsGlobal = true)
         text.appendLine("GPU driver: ${driverPath.ifEmpty { "system" }.substringAfterLast('/')}")
+        appendPowerState(context, text)
         text.appendLine()
         text.appendLine("Readiness check:")
         checks.forEach { text.appendLine("  [${it.status}] ${it.title}: ${it.message}") }
@@ -568,12 +572,123 @@ class Switch2ReadinessFragment : Fragment() {
             if (skipped > 0) {
                 text.appendLine("(first $skipped bytes left out)")
             }
-            text.append(String(bytes, skipped, bytes.size - skipped))
+            compactLog(String(bytes, skipped, bytes.size - skipped), text)
         }
         val dir = File(context.cacheDir, "report").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         return File(dir, "eden-sx2a-report-$stamp.txt").apply { writeText(text.toString()) }
+    }
+
+    private fun appendPowerState(context: Context, text: StringBuilder) {
+        val powerManager = context.getSystemService(PowerManager::class.java)
+        val activityManager = context.getSystemService(ActivityManager::class.java)
+        text.appendLine(
+            "Battery optimization: " +
+                if (powerManager.isIgnoringBatteryOptimizations(context.packageName)) {
+                    "off (unrestricted)"
+                } else {
+                    "on"
+                }
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            text.appendLine(
+                "Battery usage Restricted: " +
+                    if (activityManager.isBackgroundRestricted) "yes" else "no"
+            )
+            val bucket = context.getSystemService(UsageStatsManager::class.java).appStandbyBucket
+            text.appendLine("Standby bucket: ${standbyBucketName(bucket)}")
+        }
+        text.appendLine("Battery saver: " + if (powerManager.isPowerSaveMode) "on" else "off")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            text.appendLine("Thermal status: ${thermalStatusName(powerManager.currentThermalStatus)}")
+        }
+        val battery = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        if (battery != null) {
+            val level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
+            val plugged = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+            if (level >= 0 && scale > 0) {
+                text.appendLine(
+                    "Battery: ${level * 100 / scale}%, " + if (plugged) "plugged in" else "on battery"
+                )
+            }
+        }
+    }
+
+    private fun standbyBucketName(bucket: Int): String =
+        when (bucket) {
+            UsageStatsManager.STANDBY_BUCKET_ACTIVE -> "active"
+            UsageStatsManager.STANDBY_BUCKET_WORKING_SET -> "working set"
+            UsageStatsManager.STANDBY_BUCKET_FREQUENT -> "frequent"
+            UsageStatsManager.STANDBY_BUCKET_RARE -> "rare"
+            UsageStatsManager.STANDBY_BUCKET_RESTRICTED -> "restricted"
+            else -> "bucket $bucket"
+        }
+
+    private fun thermalStatusName(status: Int): String =
+        when (status) {
+            PowerManager.THERMAL_STATUS_NONE -> "none"
+            PowerManager.THERMAL_STATUS_LIGHT -> "light"
+            PowerManager.THERMAL_STATUS_MODERATE -> "moderate"
+            PowerManager.THERMAL_STATUS_SEVERE -> "severe"
+            PowerManager.THERMAL_STATUS_CRITICAL -> "critical"
+            PowerManager.THERMAL_STATUS_EMERGENCY -> "emergency"
+            PowerManager.THERMAL_STATUS_SHUTDOWN -> "shutdown"
+            else -> "status $status"
+        }
+
+    // Logs repeat the same message thousands of times (stubbed services, skipped draws, per-frame
+    // lines). Messages are compared without their timestamp and with numbers masked: a run of one
+    // message becomes a count, each message is kept at most MAX_SAME_LOG_LINES times, and the rest
+    // are counted in a table. The last LOG_TAIL_LINES lines, where a crash shows, stay as they are.
+    private fun compactLog(log: String, text: StringBuilder) {
+        val lines = log.lines()
+        val bodyEnd = (lines.size - LOG_TAIL_LINES).coerceAtLeast(0)
+        val seen = HashMap<String, Int>()
+        val lastSeen = HashMap<String, String>()
+        var previous: String? = null
+        var run = 0
+        val endRun = {
+            if (run > 0) {
+                text.appendLine("    (similar line $run more times)")
+            }
+            run = 0
+        }
+        for (line in lines.subList(0, bodyEnd)) {
+            if (!line.startsWith("[")) {
+                endRun()
+                previous = null
+                text.appendLine(line)
+                continue
+            }
+            val message = line.substringAfter("] ", line)
+            val key = NUMBERS.replace(message, "#")
+            val count = (seen[key] ?: 0) + 1
+            seen[key] = count
+            lastSeen[key] = message
+            if (key == previous) {
+                run++
+                continue
+            }
+            endRun()
+            previous = key
+            if (count <= MAX_SAME_LOG_LINES) {
+                text.appendLine(line)
+            }
+        }
+        endRun()
+        val repeated = seen.filterValues { it > MAX_SAME_LOG_LINES }
+        if (repeated.isNotEmpty()) {
+            text.appendLine("---- messages seen more than $MAX_SAME_LOG_LINES times ----")
+            repeated.entries.sortedByDescending { it.value }.take(MAX_REPEAT_TABLE).forEach {
+                text.appendLine("${it.value}x, last: ${lastSeen[it.key]}")
+            }
+        }
+        if (bodyEnd < lines.size) {
+            text.appendLine("---- last ${lines.size - bodyEnd} lines ----")
+            lines.subList(bodyEnd, lines.size).forEach { text.appendLine(it) }
+        }
     }
 
     private fun exitReasonName(reason: Int): String =
@@ -722,7 +837,11 @@ class Switch2ReadinessFragment : Fragment() {
         private const val KEY_ASYNC_PRESENTATION = "async_presentation"
         private const val DEBUG_ENV_FILE = "nx2_env.txt"
         private const val MIN_FREE_STORAGE_GB = 10
-        private const val MAX_LOG_BYTES = 4 * 1024 * 1024
+        private const val MAX_LOG_BYTES = 16 * 1024 * 1024
+        private const val MAX_SAME_LOG_LINES = 5
+        private const val MAX_REPEAT_TABLE = 100
+        private const val LOG_TAIL_LINES = 200
+        private val NUMBERS = Regex("0x[0-9a-fA-F]+|\\d+")
         private const val MEMORY_KILL_WINDOW_MS = 7 * DateUtils.DAY_IN_MILLIS
     }
 }
