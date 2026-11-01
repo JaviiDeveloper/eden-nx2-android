@@ -124,7 +124,8 @@ Tested on one phone (Snapdragon SM8850, 16 GB RAM).
 
 **Switching to another game.** Close Eden SX2A first (swipe it away from recent apps), then open it again.
 
-**Still stuck?** Open the readiness check, tap **Share report**, and send the file. It has your phone model, RAM and
+**Still stuck?** Open the readiness check, tap **Share report**, and send the file (Settings → **Share debug logs**
+sends the same file). It has your phone model, RAM and
 the logs. Do it right after the problem, before you start a game again.
 
 ## Known problems
