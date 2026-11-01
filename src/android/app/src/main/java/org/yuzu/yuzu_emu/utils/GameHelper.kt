@@ -284,7 +284,8 @@ object GameHelper {
     private const val NPDM_MAGIC = 0x4154454D // "META"
     private const val ACI0_MAGIC = 0x30494341 // "ACI0"
     private val exeFSSkippedDirs = setOf("romfs", "dlc")
-    private val exeFSNonTitleDirs = setOf("exefs", "base", "updates")
+    private val exeFSNonTitleDirs = setOf("exefs", "base", "updates", "update")
+    private val exeFSStorageLevels = setOf("base", "update", "updates")
 
     // Loose ExeFS titles (Switch 2) boot from exefs/main by real path. Accepts the game folder
     // (containing exefs/) or the exefs folder itself.
@@ -301,6 +302,12 @@ object GameHelper {
         val exefsFolder = File(folder, "exefs")
         if (exefsFolder.isDirectory) {
             File(exefsFolder, "main").takeIf { it.isFile }?.let { mains.add(it) }
+        }
+
+        // Check base/exefs/main layout
+        val baseExefsFolder = File(folder, "base/exefs")
+        if (baseExefsFolder.isDirectory) {
+            File(baseExefsFolder, "main").takeIf { it.isFile }?.let { mains.add(it) }
         }
 
         // Recursively search subdirectories
@@ -405,17 +412,86 @@ object GameHelper {
         return dir.name.toLongOrNull() ?: -1
     }
 
+    // Find RomFS for a loose ExeFS dump: the first .romfs file next to main,
+    // else a romfs/ directory next to the exefs/ directory
+    private fun findLooseRomFS(mainFile: File): File? {
+        val exefsDir = mainFile.parentFile ?: return null
+
+        // Check for .romfs files in exefs directory
+        exefsDir.listFiles()?.forEach { file ->
+            if (file.isFile && file.extension.equals("romfs", ignoreCase = true)) {
+                return file
+            }
+        }
+
+        // Check for romfs/ directory next to exefs/
+        val parentDir = exefsDir.parentFile ?: return null
+        val romfsDir = File(parentDir, "romfs")
+        if (romfsDir.isDirectory) {
+            return romfsDir
+        }
+
+        return null
+    }
+
+    // Calculate total size of a loose dump (exefs + romfs)
+    private fun calculateLooseDumpSize(mainFile: File): Long {
+        val exefsDir = mainFile.parentFile ?: return mainFile.length()
+        var totalSize = 0L
+
+        // Sum exefs directory
+        exefsDir.walkTopDown().forEach { file ->
+            if (file.isFile) {
+                totalSize += file.length()
+            }
+        }
+
+        // Add romfs if present
+        findLooseRomFS(mainFile)?.let { romfs ->
+            if (romfs.isDirectory) {
+                romfs.walkTopDown().forEach { file ->
+                    if (file.isFile) {
+                        totalSize += file.length()
+                    }
+                }
+            } else {
+                totalSize += romfs.length()
+            }
+        }
+
+        return totalSize
+    }
+
     private fun exeFSTitle(main: File, folder: File): String {
         var dir = main.parentFile
-        while (dir != null) {
+        var isUpdate = false
+
+        // Skip storage levels (base, update, updates, hex IDs)
+        while (dir != null && dir != folder) {
             val name = dir.name
-            if (name.isNotEmpty() && name.lowercase() !in exeFSNonTitleDirs &&
-                name.toLongOrNull() == null
-            ) {
-                return name
+            val nameLower = name.lowercase()
+
+            // Check if this is an update indicator
+            if (nameLower in setOf("update", "updates")) {
+                isUpdate = true
             }
+
+            // Check if it's a storage level (base, update, or hex ID)
+            val isStorageLevel = nameLower in exeFSStorageLevels ||
+                name.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }
+
+            if (!isStorageLevel && nameLower !in exeFSNonTitleDirs) {
+                val title = if (isUpdate && !name.contains("update", ignoreCase = true)) {
+                    "$name (update)"
+                } else {
+                    name
+                }
+                return title
+            }
+
             dir = dir.parentFile
         }
+
         return folder.name
     }
 
