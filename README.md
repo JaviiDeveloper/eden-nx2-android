@@ -7,6 +7,14 @@
 > **This is not the official Eden app, and the Eden team does not support it.**
 > Please don't report problems with this app to Eden, PokeDinner, Eglantine, Eden-NS2 or Takoroka.
 
+> [!NOTE]
+> **This is an experiment, not an actively maintained project.** Updates may stop at any time. Anyone can fork this
+> repo and keep going. The real work is done by the original emulator projects: please contribute to them and give them
+> a star: [Eden](https://git.eden-emu.dev/eden-emu/eden),
+> [PokeDinner](https://git.eden-emu.dev/Franseven/PokeDinner-a-Eglantine-Fork),
+> [Eglantine](https://github.com/Djihads80/Eglantine), [Eden-NS2](https://github.com/0x2593/Eden-NS2) and
+> [Takoroka's eden-nx2](https://git.eden-emu.dev/Takoroka/eden-nx2).
+
 # Eden SX2A
 
 This app is based on [PokeDinner](https://git.eden-emu.dev/Franseven/PokeDinner-a-Eglantine-Fork), a fork of
