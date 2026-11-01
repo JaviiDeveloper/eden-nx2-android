@@ -312,20 +312,26 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
         const GPUVAddr program =
             (u64{reset_regs.pipelines[1].reserved[0] & 0xff} << 32) | reset_regs.pipelines[1].reserved[1];
         static std::unordered_map<GPUVAddr, bool> reset_programs;
-        auto [entry, inserted] = reset_programs.try_emplace(program, false);
-        if (inserted) {
-            std::array<u32, 44> code{};
-            const GPUVAddr code_address = program + 128;
-            if (gpu_memory->IsFullyMappedRange(code_address, sizeof(code))) {
-                gpu_memory->ReadBlockUnsafe(code_address, code.data(), sizeof(code));
-                entry->second = code == NX2_INDIRECT_RESET_PROGRAM;
+        static GPUVAddr last_program = ~GPUVAddr{0};
+        static bool last_is_reset = false;
+        if (program != last_program) {
+            auto [entry, inserted] = reset_programs.try_emplace(program, false);
+            if (inserted) {
+                std::array<u32, 44> code{};
+                const GPUVAddr code_address = program + 128;
+                if (gpu_memory->IsFullyMappedRange(code_address, sizeof(code))) {
+                    gpu_memory->ReadBlockUnsafe(code_address, code.data(), sizeof(code));
+                    entry->second = code == NX2_INDIRECT_RESET_PROGRAM;
+                }
+                if (entry->second) {
+                    LOG_INFO(HW_GPU, "Indirect draw reset program at {:#x}: its stores are done here",
+                             program);
+                }
             }
-            if (entry->second) {
-                LOG_INFO(HW_GPU, "Indirect draw reset program at {:#x}: its stores are done here",
-                         program);
-            }
+            last_program = program;
+            last_is_reset = entry->second;
         }
-        if (entry->second) {
+        if (last_is_reset) {
             const auto& reset_draw = maxwell3d->draw_manager.draw_state;
             const auto& cbuf0 = maxwell3d->state.shader_stages[0].const_buffers[0];
             const GPUVAddr list = gpu_memory->Read<u64>(cbuf0.address + 0x110);

@@ -395,9 +395,8 @@ std::chrono::microseconds GetTranslationWaitBudget() {
     return std::chrono::microseconds{static_cast<s64>(milliseconds * 1000.0)};
 }
 
-// Translation threads also run the driver compile of what they translate. They get half of the
-// pipeline workers' count, so they cannot hold up the driver compiles queued on those (compute
-// pipelines wait for theirs).
+// Translation threads get half of the pipeline workers' count; driver compilation is queued
+// on the pipeline workers.
 size_t GetTotalTranslationWorkers() {
     return std::max<size_t>(1, GetTotalPipelineWorkers() / 2);
 }
@@ -1365,10 +1364,10 @@ void PipelineCache::SerializeGraphicsPipeline(const GraphicsPipelineCacheKey& ke
 //
 // The GPU thread used to translate a new pipeline (Maxwell code to IR to SPIR-V) before its
 // draw, ~2-4 ms each. Now it builds the environments, detaches them from the 3D engine (copies
-// what translation reads, see GraphicsEnvironment::Detach) and queues the translation and the
-// driver compile on translation_workers. It then waits up to translation_wait_budget for the
-// result; if the pipeline is not ready by then the draw is skipped, like a draw whose driver
-// compile is not done yet, and a later draw adopts the pipeline.
+// what translation reads, see GraphicsEnvironment::Detach) and queues the translation on
+// translation_workers; driver compilation runs on pipeline workers. It then waits up to
+// translation_wait_budget for the result; if the pipeline is not ready by then the draw is
+// skipped, like a draw whose driver compile is not done yet, and a later draw adopts the pipeline.
 //
 // Only native (Switch 2) programs take this path: their code was lowered when the shader cache
 // met them, so translation never reads guest memory for instructions. Compute pipelines stay
@@ -1450,9 +1449,9 @@ void PipelineCache::TranslateGraphicsPipeline(const GraphicsPipelineCacheKey& ke
     }
     std::unique_ptr<GraphicsPipeline> pipeline;
     try {
-        // Not built in parallel: the driver compile runs here too, so the pipeline can be drawn
-        // with as soon as the GPU thread adopts it.
-        pipeline = CreateGraphicsPipeline(pools, key, MakeSpan(env_ptrs), nullptr, false);
+        // The scheduler waits for driver compilation at the first draw, while the GPU thread
+        // waits only for translation.
+        pipeline = CreateGraphicsPipeline(pools, key, MakeSpan(env_ptrs), nullptr, true);
     } catch (const std::exception& exception) {
         // Shader errors are handled inside; nothing else may end the worker thread.
         LOG_ERROR(Render_Vulkan, "Graphics pipeline translation failed: {}", exception.what());

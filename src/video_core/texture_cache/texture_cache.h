@@ -2826,15 +2826,24 @@ bool TextureCache<P>::MarkPartialWrite(ImageBase& image, DAddr cpu_addr, size_t 
     const u32 total_pages =
         static_cast<u32>(((image_end - 1) >> Core::DEVICE_PAGEBITS) - base_page + 1);
     auto& pages = image.partial_dirty_pages;
-    for (u32 page = first; page <= last; ++page) {
-        const auto it = std::lower_bound(pages.begin(), pages.end(), page);
-        if (it != pages.end() && *it == page) {
-            continue;
+    const auto begin_it = std::lower_bound(pages.begin(), pages.end(), first);
+    const auto end_it = std::upper_bound(begin_it, pages.end(), last);
+    const auto untrack = [&](u32 run_begin, u32 run_end) {
+        if (run_begin < run_end) {
+            device_memory.UpdatePagesCachedCount((base_page + run_begin) << Core::DEVICE_PAGEBITS,
+                                                 size_t{run_end - run_begin} << Core::DEVICE_PAGEBITS,
+                                                 -1);
         }
-        pages.insert(it, page);
-        device_memory.UpdatePagesCachedCount((base_page + page) << Core::DEVICE_PAGEBITS,
-                                             Core::DEVICE_PAGESIZE, -1);
+    };
+    u32 run_begin = first;
+    for (auto it = begin_it; it != end_it; ++it) {
+        untrack(run_begin, *it);
+        run_begin = *it + 1;
     }
+    untrack(run_begin, last + 1);
+    const auto insert_index = pages.erase(begin_it, end_it) - pages.begin();
+    const auto inserted = pages.insert(pages.begin() + insert_index, last - first + 1, 0);
+    std::iota(inserted, inserted + (last - first + 1), first);
     image.flags |= ImageFlagBits::CpuModified;
     if (pages.size() > total_pages / 4) {
         // Most of the image changed: untrack it whole and upload it whole.
@@ -2917,9 +2926,15 @@ bool TextureCache<P>::MarkPartialRemap(ImageBase& image, GPUVAddr gpu_addr, size
 template <class P>
 void TextureCache<P>::RestorePartialPages(ImageBase& image) {
     const DAddr base_page = image.cpu_addr >> Core::DEVICE_PAGEBITS;
-    for (const u32 page : image.partial_dirty_pages) {
-        device_memory.UpdatePagesCachedCount((base_page + page) << Core::DEVICE_PAGEBITS,
-                                             Core::DEVICE_PAGESIZE, 1);
+    const auto& pages = image.partial_dirty_pages;
+    for (size_t index = 0; index < pages.size();) {
+        size_t end = index + 1;
+        while (end < pages.size() && pages[end] == pages[end - 1] + 1) {
+            ++end;
+        }
+        device_memory.UpdatePagesCachedCount((base_page + pages[index]) << Core::DEVICE_PAGEBITS,
+                                             (end - index) << Core::DEVICE_PAGEBITS, 1);
+        index = end;
     }
     image.partial_dirty_pages.clear();
     image.partial_remapped.clear();
