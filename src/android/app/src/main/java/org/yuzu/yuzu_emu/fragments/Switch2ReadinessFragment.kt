@@ -3,6 +3,9 @@
 
 package org.yuzu.yuzu_emu.fragments
 
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
+import android.app.usage.UsageStatsManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -13,7 +16,9 @@ import android.os.StatFs
 import android.provider.Settings as AndroidSettings
 import android.view.LayoutInflater
 import android.view.View
+import android.text.format.DateUtils
 import android.view.ViewGroup
+import androidx.annotation.RequiresApi
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -143,6 +148,9 @@ class Switch2ReadinessFragment : Fragment() {
         }
         checks.add(checkStorage())
         checks.add(checkBattery())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            checks.add(checkMemoryKiller())
+        }
         return checks
     }
 
@@ -348,17 +356,79 @@ class Switch2ReadinessFragment : Fragment() {
     }
 
     private fun Context.checkBattery(): Check {
+        val title = R.string.readiness_battery
         val powerManager = getSystemService(PowerManager::class.java)
-        return if (powerManager.isIgnoringBatteryOptimizations(packageName)) {
-            check(R.string.readiness_battery, Status.PASS, R.string.readiness_battery_ok)
-        } else {
-            check(
-                R.string.readiness_battery,
+        val activityManager = getSystemService(ActivityManager::class.java)
+        val usageStats = getSystemService(UsageStatsManager::class.java)
+        return when {
+            activityManager.isBackgroundRestricted -> check(
+                title,
+                Status.FAIL,
+                R.string.readiness_battery_background_restricted,
+                fix = Fix.APP_SETTINGS
+            )
+
+            !powerManager.isIgnoringBatteryOptimizations(packageName) -> check(
+                title,
                 Status.WARNING,
                 R.string.readiness_battery_restricted,
                 fix = Fix.APP_SETTINGS
             )
+
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                usageStats.appStandbyBucket == UsageStatsManager.STANDBY_BUCKET_RESTRICTED -> check(
+                title,
+                Status.WARNING,
+                R.string.readiness_battery_standby_restricted,
+                fix = Fix.APP_SETTINGS
+            )
+
+            else -> check(title, Status.PASS, R.string.readiness_battery_ok)
         }
+    }
+
+    // Android doesn't say whether its low memory killer is armed, but it keeps the reasons the
+    // app's process ended: kills for memory (lmkd), the cached app freezer and excessive resource
+    // use show up there, as does a phone that is low on memory right now.
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun Context.checkMemoryKiller(): Check {
+        val title = R.string.readiness_memory_killer
+        val activityManager = getSystemService(ActivityManager::class.java)
+        val since = System.currentTimeMillis() - MEMORY_KILL_WINDOW_MS
+        val kills = activityManager.getHistoricalProcessExitReasons(packageName, 0, 0)
+            .filter {
+                it.timestamp >= since && it.reason in setOf(
+                    ApplicationExitInfo.REASON_LOW_MEMORY,
+                    ApplicationExitInfo.REASON_FREEZER,
+                    ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE
+                )
+            }
+        if (kills.isNotEmpty()) {
+            val last = DateUtils.getRelativeTimeSpanString(
+                kills.maxOf { it.timestamp },
+                System.currentTimeMillis(),
+                DateUtils.MINUTE_IN_MILLIS
+            )
+            return check(
+                title,
+                Status.WARNING,
+                R.string.readiness_memory_killer_kills,
+                kills.size,
+                last,
+                fix = Fix.APP_SETTINGS
+            )
+        }
+        val memoryInfo = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+        if (memoryInfo.lowMemory) {
+            return check(
+                title,
+                Status.WARNING,
+                R.string.readiness_memory_killer_low_now,
+                MemoryUtil.bytesToSizeUnit(memoryInfo.availMem.toFloat())
+            )
+        }
+        return check(title, Status.PASS, R.string.readiness_memory_killer_ok)
     }
 
     private fun showChecks(checks: List<Check>) {
@@ -482,5 +552,6 @@ class Switch2ReadinessFragment : Fragment() {
         private const val KEY_ASYNC_PRESENTATION = "async_presentation"
         private const val DEBUG_ENV_FILE = "nx2_env.txt"
         private const val MIN_FREE_STORAGE_GB = 10
+        private const val MEMORY_KILL_WINDOW_MS = 7 * DateUtils.DAY_IN_MILLIS
     }
 }
