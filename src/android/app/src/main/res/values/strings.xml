@@ -527,6 +527,15 @@
     <string name="readiness_battery_restricted">Set battery usage to Unrestricted so Android doesn\'t close the game</string>
     <string name="readiness_battery_background_restricted">Battery usage is set to Restricted. Android stops the app as soon as it leaves the screen. Set it to Unrestricted</string>
     <string name="readiness_battery_standby_restricted">Android put the app in its most restricted standby group. Open it more often, or set battery usage to Unrestricted</string>
+    <string name="readiness_share_report">Share report</string>
+    <string name="readiness_share_report_failed">Could not write the report</string>
+    <string name="readiness_last_exit">Last exit</string>
+    <string name="readiness_last_exit_none">No earlier exit recorded</string>
+    <string name="readiness_last_exit_normal">Closed normally (%1$s)</string>
+    <string name="readiness_last_exit_memory">Android closed the app to free memory (%1$s). Close other apps before playing</string>
+    <string name="readiness_last_exit_crash">The app crashed (%1$s). Tap Share report and send the file with your bug report</string>
+    <string name="readiness_last_exit_anr">The app stopped responding and Android closed it (%1$s). Tap Share report and send the file with your bug report</string>
+    <string name="readiness_last_exit_other">Ended by the system: %1$s (%2$s)</string>
     <string name="readiness_memory_killer">Memory killer</string>
     <string name="readiness_memory_killer_ok">Android has not closed the app for lack of memory recently</string>
     <string name="readiness_memory_killer_kills">Android closed the app %1$d times in the last 7 days to free memory (last: %2$s). Close other apps before playing, and turn off app freezing or memory saving for this app if your phone has it</string>

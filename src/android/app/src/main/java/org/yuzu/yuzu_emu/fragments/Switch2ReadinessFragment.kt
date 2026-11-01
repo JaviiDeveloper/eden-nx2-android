@@ -7,6 +7,7 @@ import android.app.ActivityManager
 import android.app.ApplicationExitInfo
 import android.app.usage.UsageStatsManager
 import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -18,7 +19,9 @@ import android.view.LayoutInflater
 import android.view.View
 import android.text.format.DateUtils
 import android.view.ViewGroup
+import android.widget.Toast
 import androidx.annotation.RequiresApi
+import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -31,6 +34,9 @@ import com.google.android.material.R as MaterialR
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.transition.MaterialSharedAxis
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -58,6 +64,8 @@ class Switch2ReadinessFragment : Fragment() {
     private val binding get() = _binding!!
 
     private val homeViewModel: HomeViewModel by activityViewModels()
+
+    private var lastChecks: List<Check> = emptyList()
 
     private enum class Status { PASS, WARNING, FAIL, INFO }
 
@@ -101,6 +109,7 @@ class Switch2ReadinessFragment : Fragment() {
             requireActivity().onBackPressedDispatcher.onBackPressed()
         }
         binding.buttonRunAgain.setOnClickListener { runChecks() }
+        binding.buttonShareReport.setOnClickListener { shareReport() }
 
         setInsets()
     }
@@ -122,6 +131,7 @@ class Switch2ReadinessFragment : Fragment() {
         val context = requireContext().applicationContext
         viewLifecycleOwner.lifecycleScope.launch {
             val checks = withContext(Dispatchers.IO) { collectChecks(context) }
+            lastChecks = checks
             showChecks(checks)
             binding.buttonRunAgain.isEnabled = true
         }
@@ -149,6 +159,7 @@ class Switch2ReadinessFragment : Fragment() {
         checks.add(checkStorage())
         checks.add(checkBattery())
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            checks.add(checkLastExit())
             checks.add(checkMemoryKiller())
         }
         return checks
@@ -387,6 +398,46 @@ class Switch2ReadinessFragment : Fragment() {
         }
     }
 
+    // The current process is not in the history yet, so the newest entry is the previous run.
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun Context.checkLastExit(): Check {
+        val title = R.string.readiness_last_exit
+        val exit = getSystemService(ActivityManager::class.java)
+            .getHistoricalProcessExitReasons(packageName, 0, 1)
+            .firstOrNull() ?: return check(title, Status.INFO, R.string.readiness_last_exit_none)
+        val time = DateUtils.getRelativeTimeSpanString(
+            exit.timestamp,
+            System.currentTimeMillis(),
+            DateUtils.MINUTE_IN_MILLIS
+        )
+        return when (exit.reason) {
+            ApplicationExitInfo.REASON_EXIT_SELF,
+            ApplicationExitInfo.REASON_USER_REQUESTED,
+            ApplicationExitInfo.REASON_USER_STOPPED ->
+                check(title, Status.PASS, R.string.readiness_last_exit_normal, time)
+
+            ApplicationExitInfo.REASON_LOW_MEMORY,
+            ApplicationExitInfo.REASON_FREEZER,
+            ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE ->
+                check(title, Status.WARNING, R.string.readiness_last_exit_memory, time)
+
+            ApplicationExitInfo.REASON_CRASH,
+            ApplicationExitInfo.REASON_CRASH_NATIVE ->
+                check(title, Status.WARNING, R.string.readiness_last_exit_crash, time)
+
+            ApplicationExitInfo.REASON_ANR ->
+                check(title, Status.WARNING, R.string.readiness_last_exit_anr, time)
+
+            else -> check(
+                title,
+                Status.INFO,
+                R.string.readiness_last_exit_other,
+                exitReasonName(exit.reason),
+                time
+            )
+        }
+    }
+
     // Android doesn't say whether its low memory killer is armed, but it keeps the reasons the
     // app's process ended: kills for memory (lmkd), the cached app freezer and excessive resource
     // use show up there, as does a phone that is low on memory right now.
@@ -430,6 +481,121 @@ class Switch2ReadinessFragment : Fragment() {
         }
         return check(title, Status.PASS, R.string.readiness_memory_killer_ok)
     }
+
+    // One text file for bug reports: device, readiness results, why the app ended recently and
+    // both logs (the previous run's log holds a crash, the current one this run).
+    private fun shareReport() {
+        val context = requireContext().applicationContext
+        val checks = lastChecks
+        binding.buttonShareReport.isEnabled = false
+        viewLifecycleOwner.lifecycleScope.launch {
+            val report = withContext(Dispatchers.IO) {
+                try {
+                    writeReport(context, checks)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            binding.buttonShareReport.isEnabled = true
+            if (report == null) {
+                Toast.makeText(context, R.string.readiness_share_report_failed, Toast.LENGTH_SHORT)
+                    .show()
+                return@launch
+            }
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", report)
+            val intent = Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_STREAM, uri)
+                .putExtra(Intent.EXTRA_SUBJECT, report.name)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            intent.clipData = ClipData.newRawUri(report.name, uri)
+            startActivity(Intent.createChooser(intent, getText(R.string.readiness_share_report)))
+        }
+    }
+
+    private fun writeReport(context: Context, checks: List<Check>): File {
+        val activityManager = context.getSystemService(ActivityManager::class.java)
+        val memoryInfo = ActivityManager.MemoryInfo().also { activityManager.getMemoryInfo(it) }
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US)
+        val text = StringBuilder()
+        text.appendLine("Eden SX2A report, ${dateFormat.format(Date())}")
+        text.appendLine("App: ${BuildConfig.VERSION_NAME} (${context.packageName})")
+        text.appendLine(
+            "Device: ${Build.MANUFACTURER} ${Build.MODEL} (${Build.DEVICE}), Android " +
+                "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            text.appendLine("SoC: ${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}")
+        }
+        text.appendLine(
+            "RAM: ${MemoryUtil.bytesToSizeUnit(memoryInfo.totalMem.toFloat())} total, " +
+                "${MemoryUtil.bytesToSizeUnit(memoryInfo.availMem.toFloat())} free now" +
+                if (memoryInfo.lowMemory) " (low)" else ""
+        )
+        val driverPath = StringSetting.DRIVER_PATH.getString(needsGlobal = true)
+        text.appendLine("GPU driver: ${driverPath.ifEmpty { "system" }.substringAfterLast('/')}")
+        text.appendLine()
+        text.appendLine("Readiness check:")
+        checks.forEach { text.appendLine("  [${it.status}] ${it.title}: ${it.message}") }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            text.appendLine()
+            text.appendLine("Recent exits:")
+            activityManager.getHistoricalProcessExitReasons(context.packageName, 0, 10)
+                .forEach { exit ->
+                    text.appendLine(
+                        "  ${dateFormat.format(Date(exit.timestamp))} " +
+                            "${exitReasonName(exit.reason)} status=${exit.status} " +
+                            "importance=${exit.importance} " +
+                            "pss=${exit.pss / 1024} MiB rss=${exit.rss / 1024} MiB " +
+                            (exit.description ?: "")
+                    )
+                }
+        }
+        val logDir = File(context.getExternalFilesDir(null), "log")
+        for ((name, label) in listOf(
+            "eden_log.txt.old.txt" to "previous run",
+            "eden_log.txt" to "this run"
+        )) {
+            val log = File(logDir, name)
+            text.appendLine()
+            text.appendLine("==== $name ($label) ====")
+            if (!log.isFile) {
+                text.appendLine("(missing)")
+                continue
+            }
+            val bytes = log.readBytes()
+            val skipped = (bytes.size - MAX_LOG_BYTES).coerceAtLeast(0)
+            if (skipped > 0) {
+                text.appendLine("(first $skipped bytes left out)")
+            }
+            text.append(String(bytes, skipped, bytes.size - skipped))
+        }
+        val dir = File(context.cacheDir, "report").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        return File(dir, "eden-sx2a-report-$stamp.txt").apply { writeText(text.toString()) }
+    }
+
+    private fun exitReasonName(reason: Int): String =
+        when (reason) {
+            ApplicationExitInfo.REASON_EXIT_SELF -> "exit self"
+            ApplicationExitInfo.REASON_SIGNALED -> "signaled"
+            ApplicationExitInfo.REASON_LOW_MEMORY -> "low memory"
+            ApplicationExitInfo.REASON_CRASH -> "crash (Java)"
+            ApplicationExitInfo.REASON_CRASH_NATIVE -> "crash (native)"
+            ApplicationExitInfo.REASON_ANR -> "not responding"
+            ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "initialization failure"
+            ApplicationExitInfo.REASON_PERMISSION_CHANGE -> "permission change"
+            ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "excessive resource usage"
+            ApplicationExitInfo.REASON_USER_REQUESTED -> "user requested"
+            ApplicationExitInfo.REASON_USER_STOPPED -> "user stopped"
+            ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "dependency died"
+            ApplicationExitInfo.REASON_OTHER -> "other"
+            ApplicationExitInfo.REASON_FREEZER -> "freezer"
+            ApplicationExitInfo.REASON_PACKAGE_STATE_CHANGE -> "package state change"
+            ApplicationExitInfo.REASON_PACKAGE_UPDATED -> "package updated"
+            else -> "reason $reason"
+        }
 
     private fun showChecks(checks: List<Check>) {
         val list = binding.listChecks
@@ -531,6 +697,10 @@ class Switch2ReadinessFragment : Fragment() {
             binding.toolbarReadiness.updateMargins(left = leftInsets, right = rightInsets)
 
             val fabSpacing = resources.getDimensionPixelSize(R.dimen.spacing_fab)
+            binding.buttonShareReport.updateMargins(
+                left = leftInsets + fabSpacing,
+                bottom = barInsets.bottom + fabSpacing
+            )
             binding.buttonRunAgain.updateMargins(
                 left = leftInsets + fabSpacing,
                 right = rightInsets + fabSpacing,
@@ -552,6 +722,7 @@ class Switch2ReadinessFragment : Fragment() {
         private const val KEY_ASYNC_PRESENTATION = "async_presentation"
         private const val DEBUG_ENV_FILE = "nx2_env.txt"
         private const val MIN_FREE_STORAGE_GB = 10
+        private const val MAX_LOG_BYTES = 4 * 1024 * 1024
         private const val MEMORY_KILL_WINDOW_MS = 7 * DateUtils.DAY_IN_MILLIS
     }
 }
