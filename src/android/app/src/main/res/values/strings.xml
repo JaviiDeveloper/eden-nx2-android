@@ -405,7 +405,7 @@
     <string name="firmware_installed_failure_description">Make sure the firmware nca files are at the root of the zip and try again.</string>
     <string name="firmware_uninstalled_failure">Firmware uninstallation failed</string>
     <string name="share_log">Share debug logs</string>
-    <string name="share_log_description">Share Eden\'s log file to debug issues</string>
+    <string name="share_log_description">Share a report with your phone details and the logs</string>
     <string name="share_log_missing">No log file found</string>
     <string name="share_gpu_log">Share GPU logs</string>
     <string name="share_gpu_log_description">Share Eden\'s GPU log file to debug graphics issues</string>
