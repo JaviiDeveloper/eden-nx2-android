@@ -81,7 +81,7 @@ It checks your phone and shows what is missing:
 Most items have a **button** that takes you to the right place to fix it. Tap **Run again** after you fix something.
 
 It checks: Android version, RAM, graphics chip and driver, settings, All files access, if games were found, free space,
-and battery setting.
+battery setting, and if Android closed the app to free memory in the last 7 days.
 
 ## Which games work
 
@@ -108,6 +108,8 @@ Tested on one phone (Snapdragon SM8850, 16 GB RAM).
 - Black for a very long time? Your game files may be broken. Dump the game again.
 
 **The app closes by itself.**
+- Open the readiness check. **Memory killer** shows if Android closed the app to free memory, and **Battery usage**
+  shows if Android limits the app.
 - Your phone ran out of memory. Close other apps first.
 - Set the battery setting for Eden SX2A to **Unrestricted**.
 - Turn off "app freezer" or "memory saver" for Eden SX2A, if your phone has it.
