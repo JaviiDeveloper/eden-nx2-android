@@ -178,7 +178,9 @@ bool IsBootableGameContainer(FileSys::VirtualFile file, FileType type, u64 progr
             return false;
         }
         const auto* base = nup.GetBasePackage();
-        return base != nullptr && base->exefs_dir != nullptr;
+        const auto updates = nup.GetUpdatePackages();
+        return (base != nullptr && base->exefs_dir != nullptr) ||
+               (!updates.empty() && updates.back()->exefs_dir != nullptr);
     }
 
     return HasApplicationProgramContent(OpenContainerAsNsp(file, type, program_id, program_index));

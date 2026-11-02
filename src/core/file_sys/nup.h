@@ -50,7 +50,7 @@ public:
 private:
     bool Parse();
     void ParseMetaTLVs(NupPackageInfo& pkg, u64 meta_offset, u32 meta_size);
-    VirtualDir BuildDirectoryTree(u32 dir_index);
+    VirtualDir BuildDirectoryTree(u32 dir_index, u32 depth);
     VirtualFile MakeFileView(u64 extent_offset, u64 extent_size, u64 uncompressed_size,
                              u8 codec, const std::string& name);
 
@@ -61,6 +61,8 @@ private:
     // Parsed TOC data
     std::vector<u8> toc_data;
     u64 toc_offset{};
+    u64 blob_offset{};
+    u64 container_size{};
     u64 dir_count{};
     u64 file_count{};
     u64 string_pool_off{};

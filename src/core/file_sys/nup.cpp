@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <mutex>
+#include <openssl/evp.h>
 #include "common/logging.h"
 #include "common/zstd_compression.h"
 #include "core/file_sys/nup.h"
@@ -20,6 +22,7 @@ constexpr u32 PACKAGE_RECORD_SIZE = 0x40;
 constexpr u32 DIR_RECORD_SIZE = 0x18;
 constexpr u32 FILE_RECORD_SIZE = 0x50;
 constexpr u32 INVALID_DIR = 0xFFFFFFFF;
+constexpr u32 MAX_DIR_DEPTH = 128;
 
 u16 ReadLE16(const u8* data) {
     return static_cast<u16>(data[0]) | (static_cast<u16>(data[1]) << 8);
@@ -68,6 +71,7 @@ public:
 
 private:
     const std::vector<u8>& Decompress() const {
+        std::scoped_lock lock{mutex_};
         if (!decompressed_.empty() || extent_size_ == 0) {
             return decompressed_;
         }
@@ -78,7 +82,7 @@ private:
         decompressed_.resize(uncompressed_size_);
         const auto written = Common::Compression::DecompressDataZSTD(
             std::span<const u8>(compressed), std::span<u8>(decompressed_));
-        if (written == 0) {
+        if (written != uncompressed_size_) {
             LOG_ERROR(Loader, "NUP: zstd decompression failed for {}", name_);
             decompressed_.clear();
         }
@@ -91,6 +95,7 @@ private:
     u64 uncompressed_size_;
     std::string name_;
     mutable std::vector<u8> decompressed_;
+    mutable std::mutex mutex_;
 };
 
 } // namespace
@@ -169,7 +174,7 @@ bool NUP::Parse() {
 
     toc_offset = ReadLE64(superblock.data() + 0x08);
     const u64 toc_size = ReadLE64(superblock.data() + 0x10);
-    const u64 blob_offset = ReadLE64(superblock.data() + 0x38);
+    blob_offset = ReadLE64(superblock.data() + 0x38);
     const u64 file_size = ReadLE64(superblock.data() + 0x40);
     package_count = ReadLE32(superblock.data() + 0x48);
     const u32 flags = ReadLE32(superblock.data() + 0x4C);
@@ -184,7 +189,10 @@ bool NUP::Parse() {
         return false;
     }
 
-    if (toc_offset + toc_size > blob_offset || blob_offset > file_size) {
+    container_size = nup_file->GetSize();
+    if (toc_offset != header_size || toc_size < 0x30 || toc_size > container_size ||
+        toc_offset + toc_size > blob_offset || blob_offset > file_size ||
+        file_size != container_size) {
         LOG_ERROR(Loader, "NUP: invalid layout");
         return false;
     }
@@ -196,8 +204,17 @@ bool NUP::Parse() {
         return false;
     }
 
+    std::array<u8, 32> toc_hash{};
+    unsigned int hash_len = 0;
+    EVP_Digest(toc_data.data(), toc_data.size(), toc_hash.data(), &hash_len, EVP_sha256(),
+               nullptr);
+    if (std::memcmp(toc_hash.data(), superblock.data() + 0x18, toc_hash.size()) != 0) {
+        LOG_ERROR(Loader, "NUP: TOC hash mismatch");
+        return false;
+    }
+
     // Validate TOC header
-    if (toc_size < 0x30 || std::memcmp(toc_data.data(), TOC_MAGIC.data(), 4) != 0) {
+    if (std::memcmp(toc_data.data(), TOC_MAGIC.data(), 4) != 0) {
         LOG_ERROR(Loader, "NUP: invalid TOC magic");
         return false;
     }
@@ -212,6 +229,12 @@ bool NUP::Parse() {
     file_count = ReadLE64(toc_data.data() + 0x10);
     string_pool_off = ReadLE64(toc_data.data() + 0x18);
     string_pool_size = ReadLE64(toc_data.data() + 0x20);
+
+    if (package_count > toc_size / PACKAGE_RECORD_SIZE || dir_count > toc_size / DIR_RECORD_SIZE ||
+        file_count > toc_size / FILE_RECORD_SIZE) {
+        LOG_ERROR(Loader, "NUP: TOC counts out of bounds");
+        return false;
+    }
 
     // Calculate section offsets within TOC
     packages_off = 0x30;
@@ -232,8 +255,8 @@ bool NUP::Parse() {
 
     // Bounds check
     const u64 children_end = children_off + total_children * 4;
-    if (children_end > toc_data.size() ||
-        string_pool_off + string_pool_size > toc_data.size()) {
+    if (children_end > toc_data.size() || string_pool_off > toc_data.size() ||
+        string_pool_size > toc_data.size() - string_pool_off) {
         LOG_ERROR(Loader, "NUP: TOC sections out of bounds");
         return false;
     }
@@ -253,8 +276,8 @@ bool NUP::Parse() {
         pkg.kind = static_cast<NupPackageKind>(p[0x18]);
         pkg.standalone_update = (p[0x19] & 0x01) != 0;
 
-        const u64 meta_offset = ReadLE64(p + 0x1C);
-        const u32 meta_size = ReadLE32(p + 0x24);
+        const u64 meta_offset = ReadLE64(p + 0x20);
+        const u32 meta_size = ReadLE32(p + 0x28);
 
         if (static_cast<u8>(pkg.kind) > 4) {
             LOG_ERROR(Loader, "NUP: unknown package kind {}", static_cast<u8>(pkg.kind));
@@ -263,17 +286,18 @@ bool NUP::Parse() {
 
         // Build directory trees
         if (root_dir_idx < dir_count) {
-            pkg.root_dir = BuildDirectoryTree(root_dir_idx);
+            pkg.root_dir = BuildDirectoryTree(root_dir_idx, 0);
         }
         if (exefs_dir_idx != INVALID_DIR && exefs_dir_idx < dir_count) {
-            pkg.exefs_dir = BuildDirectoryTree(exefs_dir_idx);
+            pkg.exefs_dir = BuildDirectoryTree(exefs_dir_idx, 0);
         }
         if (romfs_dir_idx != INVALID_DIR && romfs_dir_idx < dir_count) {
-            pkg.romfs_dir = BuildDirectoryTree(romfs_dir_idx);
+            pkg.romfs_dir = BuildDirectoryTree(romfs_dir_idx, 0);
         }
 
         // Parse meta TLVs
-        if (meta_offset > 0 && meta_size > 0) {
+        if (meta_offset > 0 && meta_size > 0 && meta_offset <= container_size &&
+            meta_size <= container_size - meta_offset) {
             ParseMetaTLVs(pkg, meta_offset, meta_size);
         }
 
@@ -285,8 +309,9 @@ bool NUP::Parse() {
     return true;
 }
 
-VirtualDir NUP::BuildDirectoryTree(u32 dir_index) {
-    if (dir_index >= dir_count) {
+VirtualDir NUP::BuildDirectoryTree(u32 dir_index, u32 depth) {
+    // Records reference each other by index, so a broken file can form a cycle.
+    if (dir_index >= dir_count || depth > MAX_DIR_DEPTH) {
         return nullptr;
     }
 
@@ -312,7 +337,7 @@ VirtualDir NUP::BuildDirectoryTree(u32 dir_index) {
 
         if (node_id < dir_count) {
             // Child is a directory
-            auto child_dir = BuildDirectoryTree(node_id);
+            auto child_dir = BuildDirectoryTree(node_id, depth + 1);
             if (child_dir) {
                 child_dirs.push_back(std::move(child_dir));
             }
@@ -328,10 +353,10 @@ VirtualDir NUP::BuildDirectoryTree(u32 dir_index) {
 
             const u32 f_name_off = ReadLE32(f + 0x00);
             const u32 f_name_len = ReadLE32(f + 0x04);
-            const u64 f_size = ReadLE64(f + 0x0C);
-            const u64 f_extent_offset = ReadLE64(f + 0x34);
-            const u64 f_extent_size = ReadLE64(f + 0x3C);
-            const u8 f_codec = f[0x44];
+            const u64 f_size = ReadLE64(f + 0x08);
+            const u64 f_extent_offset = ReadLE64(f + 0x10);
+            const u64 f_extent_size = ReadLE64(f + 0x18);
+            const u8 f_codec = f[0x40];
 
             const std::string file_name = ReadString(f_name_off, f_name_len);
             auto vfs_file = MakeFileView(f_extent_offset, f_extent_size, f_size,
@@ -351,9 +376,18 @@ VirtualFile NUP::MakeFileView(u64 extent_offset, u64 extent_size, u64 uncompress
     if (uncompressed_size == 0) {
         return std::make_shared<VectorVfsFile>(std::vector<u8>{}, name);
     }
+    if (extent_offset < blob_offset || extent_offset > container_size ||
+        extent_size > container_size - extent_offset) {
+        LOG_ERROR(Loader, "NUP: extent out of bounds for file {}", name);
+        return nullptr;
+    }
 
     switch (codec) {
     case 0: // raw
+        if (extent_size != uncompressed_size) {
+            LOG_ERROR(Loader, "NUP: raw extent size mismatch for file {}", name);
+            return nullptr;
+        }
         return std::make_shared<OffsetVfsFile>(nup_file, extent_size, extent_offset, name);
     case 1: // zstd
         return std::make_shared<NupZstdFile>(nup_file, extent_offset, extent_size,
@@ -370,13 +404,13 @@ void NUP::ParseMetaTLVs(NupPackageInfo& pkg, u64 meta_offset, u32 meta_size) {
         return;
     }
 
-    u32 pos = 0;
+    u64 pos = 0;
     while (pos + 8 <= meta_size) {
         const u16 type = ReadLE16(meta.data() + pos);
         const u32 payload_size = ReadLE32(meta.data() + pos + 4);
         pos += 8;
 
-        if (pos + payload_size > meta_size) {
+        if (payload_size > meta_size - pos) {
             break;
         }
 
@@ -410,7 +444,7 @@ void NUP::ParseMetaTLVs(NupPackageInfo& pkg, u64 meta_offset, u32 meta_size) {
 }
 
 std::string NUP::ReadString(u32 offset, u32 length) const {
-    if (string_pool_off + offset + length > toc_data.size()) {
+    if (static_cast<u64>(offset) + length > string_pool_size) {
         return {};
     }
     return std::string(reinterpret_cast<const char*>(toc_data.data() + string_pool_off + offset),

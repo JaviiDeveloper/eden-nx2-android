@@ -412,56 +412,6 @@ object GameHelper {
         return dir.name.toLongOrNull() ?: -1
     }
 
-    // Find RomFS for a loose ExeFS dump: the first .romfs file next to main,
-    // else a romfs/ directory next to the exefs/ directory
-    private fun findLooseRomFS(mainFile: File): File? {
-        val exefsDir = mainFile.parentFile ?: return null
-
-        // Check for .romfs files in exefs directory
-        exefsDir.listFiles()?.forEach { file ->
-            if (file.isFile && file.extension.equals("romfs", ignoreCase = true)) {
-                return file
-            }
-        }
-
-        // Check for romfs/ directory next to exefs/
-        val parentDir = exefsDir.parentFile ?: return null
-        val romfsDir = File(parentDir, "romfs")
-        if (romfsDir.isDirectory) {
-            return romfsDir
-        }
-
-        return null
-    }
-
-    // Calculate total size of a loose dump (exefs + romfs)
-    private fun calculateLooseDumpSize(mainFile: File): Long {
-        val exefsDir = mainFile.parentFile ?: return mainFile.length()
-        var totalSize = 0L
-
-        // Sum exefs directory
-        exefsDir.walkTopDown().forEach { file ->
-            if (file.isFile) {
-                totalSize += file.length()
-            }
-        }
-
-        // Add romfs if present
-        findLooseRomFS(mainFile)?.let { romfs ->
-            if (romfs.isDirectory) {
-                romfs.walkTopDown().forEach { file ->
-                    if (file.isFile) {
-                        totalSize += file.length()
-                    }
-                }
-            } else {
-                totalSize += romfs.length()
-            }
-        }
-
-        return totalSize
-    }
-
     private fun exeFSTitle(main: File, folder: File): String {
         var dir = main.parentFile
         var isUpdate = false

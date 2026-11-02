@@ -6,6 +6,7 @@
 #include "core/file_sys/control_metadata.h"
 #include "core/file_sys/nup.h"
 #include "core/file_sys/romfs.h"
+#include "core/file_sys/vfs/vfs_layered.h"
 #include "core/file_sys/vfs/vfs_vector.h"
 #include "core/loader/deconstructed_rom_directory.h"
 #include "core/loader/nup.h"
@@ -32,15 +33,35 @@ AppLoader_Nup::AppLoader_Nup(FileSys::VirtualFile file_)
     icon_data = base->icon_data;
     nacp_data = base->nacp_data;
 
-    // Build RomFS from the package's romfs directory tree
-    if (base->romfs_dir) {
-        romfs = FileSys::CreateRomFS(base->romfs_dir);
+    // The newest update replaces the ExeFS and is layered over the base RomFS.
+    const auto updates = nup->GetUpdatePackages();
+    const auto* update = updates.empty() ? nullptr : updates.back();
+    if (update != nullptr && update != base) {
+        if (!update->display_version.empty()) {
+            display_version = update->display_version;
+        }
+        if (!update->nacp_data.empty()) {
+            nacp_data = update->nacp_data;
+        }
     }
 
-    // Create secondary loader from exefs directory
-    if (base->exefs_dir) {
-        secondary_loader = std::make_unique<AppLoader_DeconstructedRomDirectory>(
-            base->exefs_dir, false);
+    std::vector<FileSys::VirtualDir> romfs_layers;
+    if (update != nullptr && update != base && update->romfs_dir) {
+        romfs_layers.push_back(update->romfs_dir);
+    }
+    if (base->romfs_dir) {
+        romfs_layers.push_back(base->romfs_dir);
+    }
+    if (!romfs_layers.empty()) {
+        romfs = FileSys::CreateRomFS(
+            FileSys::LayeredVfsDirectory::MakeLayeredDirectory(std::move(romfs_layers)));
+    }
+
+    const auto& exefs_dir =
+        update != nullptr && update->exefs_dir ? update->exefs_dir : base->exefs_dir;
+    if (exefs_dir) {
+        secondary_loader =
+            std::make_unique<AppLoader_DeconstructedRomDirectory>(exefs_dir, false);
     }
 }
 
