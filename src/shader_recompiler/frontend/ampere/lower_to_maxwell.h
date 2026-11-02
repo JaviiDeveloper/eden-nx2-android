@@ -2223,14 +2223,11 @@ inline LoweredProgram LowerToMaxwell(std::span<const Instruction> code,
                  (u64{insn.Bits(78, 2)} << 39));
             break;
         }
-        case 0x207: case 0x807: case 0xa07: { // Bitwise SEL
-            const u32 a = operand(0, false), b = operand(1, false);
-            emit(base(0x5ca0000000000000ULL) | (u64{a} << 8) | (u64{b} << 20) |
-                (u64{insn.Bits(87, 3)} << 39) | (u64{insn.Bits(90, 1)} << 42));
-            break;
-        }
-        case 0x208: case 0x808: case 0xa08: { // FSEL: the sources keep their .NEG/.ABS
-            const u32 a = operand(0), b = operand(1);
+        case 0x207: case 0x807: case 0xa07:
+        case 0x208: case 0x808: case 0xa08: { // Bitwise SEL / FSEL
+            // FSEL applies the floating operand modifiers (negate/absolute) before selecting.
+            const bool floating = (opcode & 0x1ff) == 0x008;
+            const u32 a = operand(0, floating), b = operand(1, floating);
             emit(base(0x5ca0000000000000ULL) | (u64{a} << 8) | (u64{b} << 20) |
                 (u64{insn.Bits(87, 3)} << 39) | (u64{insn.Bits(90, 1)} << 42));
             break;
