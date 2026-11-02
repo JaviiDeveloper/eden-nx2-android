@@ -60,7 +60,8 @@ class VertexRepackPass final : public ComputePass {
 public:
     VertexRepackPass(const Device& device, Scheduler& scheduler, DescriptorPool& descriptor_pool,
                      StagingBufferPool& staging_pool, ComputePassDescriptorQueue& descriptor_queue);
-    /// Returns nothing when the range exceeds the device limits; the binding is then left as is.
+    /// Splits a range over the device limits into several dispatches. Returns nothing only when
+    /// not even one vertex fits them; the caller then keeps the 69-byte layout.
     std::optional<std::pair<VkBuffer, VkDeviceSize>> Assemble(VkBuffer source, u32 offset,
                                                               u32 size);
 

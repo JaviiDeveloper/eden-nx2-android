@@ -116,6 +116,12 @@ public:
         return (vertex_repack_mask & (1U << binding)) != 0;
     }
 
+    /// A binding that could not be repacked keeps its 69-byte layout for this draw. Buffers are bound
+    /// before the vertex input is built, so the input then matches the buffer actually bound.
+    void KeepVertexLayout(u32 binding) {
+        vertex_repack_mask &= ~(1U << binding);
+    }
+
     u64 CurrentTick();
 
     bool IsFree(u64 tick);

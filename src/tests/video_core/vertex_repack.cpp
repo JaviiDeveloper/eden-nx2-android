@@ -109,3 +109,25 @@ TEST_CASE("Vertex repack planning rejects overflow and device-limit violations",
     REQUIRE(one.has_value());
     REQUIRE(one->source_range == 72);
 }
+
+TEST_CASE("Vertex repack chunks fit the device limits and keep outputs aligned", "[vertex_repack]") {
+    for (const u64 alignment : {4ULL, 16ULL, 64ULL, 256ULL}) {
+        for (const u64 max_range : {u64{1} << 27, u64{1} << 30, u64{0xffffffff}}) {
+            for (const u32 max_groups : {65535U, 0xffffffffU}) {
+                const u32 vertices = Vulkan::VertexRepackChunkVertices(alignment, max_range, max_groups);
+                REQUIRE(vertices > 0);
+                REQUIRE(u64{vertices} * 72 % alignment == 0);
+                // The worst-placed chunk: largest bias, full size.
+                const auto plan = Vulkan::MakeVertexRepackParameters(
+                    static_cast<u32>(alignment - 1), vertices * 69, alignment, max_range, max_groups);
+                REQUIRE(plan.has_value());
+                REQUIRE(plan->vertices == vertices);
+            }
+        }
+    }
+    // A 64 MB binding is over one dispatch at 65535 groups and is split, not refused.
+    const u32 vertices = Vulkan::VertexRepackChunkVertices(256, u64{1} << 27, 65535);
+    REQUIRE(u64{vertices} * 69 < (u64{64} << 20));
+    REQUIRE_FALSE(Vulkan::VertexRepackChunkVertices(0, u64{1} << 27, 65535));
+    REQUIRE_FALSE(Vulkan::VertexRepackChunkVertices(256, 300, 65535));
+}

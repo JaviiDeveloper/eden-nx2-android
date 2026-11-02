@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include "video_core/engines/maxwell_3d.h"
 
@@ -50,6 +51,23 @@ inline std::optional<VertexRepackParameters> MakeVertexRepackParameters(
     return VertexRepackParameters{static_cast<u32>(vertices), static_cast<u32>(output_size),
                                  static_cast<u32>(base), static_cast<u32>(bias),
                                  static_cast<u32>(range), static_cast<u32>(groups)};
+}
+
+// Most vertices one dispatch may cover so that its source and output ranges and its group count fit
+// the device limits. A multiple of the vertex count whose 72-byte output is storage-aligned, so each
+// chunk's output descriptor starts aligned. Zero when not even one such step fits.
+inline u32 VertexRepackChunkVertices(u64 alignment, u64 max_storage_range, u32 max_dispatch_groups) {
+    if (alignment == 0) {
+        return 0;
+    }
+    const u64 step = alignment / std::gcd(alignment, u64{72});
+    // A chunk's source bias can be up to alignment - 1, and its range rounds up to a word.
+    const u64 by_source =
+        max_storage_range > alignment + 3 ? (max_storage_range - alignment - 3) / 69 : 0;
+    const u64 by_output = max_storage_range / 72;
+    const u64 by_groups = u64{max_dispatch_groups} * 128 / 18;
+    const u64 by_u32 = std::numeric_limits<u32>::max() / 72;
+    return static_cast<u32>((std::min)({by_source, by_output, by_groups, by_u32}) / step * step);
 }
 
 inline bool VertexRepackEnabled() {

@@ -666,15 +666,18 @@ void BufferCacheRuntime::BindVertexBuffer(u32 index, VkBuffer buffer, u32 offset
     if (index >= device.GetMaxVertexInputBindings()) {
         return;
     }
-    if (buffer != VK_NULL_HANDLE && size != 0 && IsVertexRepacked(index)) {
-        const auto repacked = vertex_repack_pass->Assemble(buffer, offset, size);
-        if (!repacked) {
-            return;
+    if (IsVertexRepacked(index)) {
+        const auto repacked = buffer != VK_NULL_HANDLE && size != 0 && stride == 69
+                                  ? vertex_repack_pass->Assemble(buffer, offset, size)
+                                  : std::nullopt;
+        if (repacked) {
+            buffer = repacked->first;
+            offset = static_cast<u32>(repacked->second);
+            size = static_cast<u32>((u64{size} + 68) / 69 * 72);
+            stride = 72;
+        } else {
+            KeepVertexLayout(index);
         }
-        buffer = repacked->first;
-        offset = static_cast<u32>(repacked->second);
-        size = static_cast<u32>((u64{size} + 68) / 69 * 72);
-        stride = 72;
     }
     if (device.IsExtExtendedDynamicStateSupported()) {
         scheduler.Record([index, buffer, offset, size, stride](vk::CommandBuffer cmdbuf) {
@@ -699,6 +702,7 @@ void BufferCacheRuntime::BindVertexBuffers(VideoCommon::HostBindings<Buffer>& bi
     boost::container::static_vector<VkBuffer, VideoCommon::NUM_VERTEX_BUFFERS> buffer_handles(bindings.buffers.size());
     for (u32 i = 0; i < bindings.buffers.size(); ++i) {
         auto handle = bindings.buffers[i]->Handle();
+        const bool unbound = handle == VK_NULL_HANDLE;
         if (handle == VK_NULL_HANDLE) {
             bindings.offsets[i] = 0;
             bindings.sizes[i] = VK_WHOLE_SIZE;
@@ -709,11 +713,16 @@ void BufferCacheRuntime::BindVertexBuffers(VideoCommon::HostBindings<Buffer>& bi
         }
         buffer_handles[i] = handle;
         const u32 binding = bindings.min_index + i;
-        if (handle != VK_NULL_HANDLE && IsVertexRepacked(binding) && bindings.strides[i] == 69 &&
-            bindings.sizes[i] > 0) {
-            const auto repacked = vertex_repack_pass->Assemble(
-                handle, static_cast<u32>(bindings.offsets[i]), static_cast<u32>(bindings.sizes[i]));
+        if (IsVertexRepacked(binding)) {
+            // A null binding reads nothing worth moving and its size is VK_WHOLE_SIZE.
+            const auto repacked = !unbound && bindings.strides[i] == 69 && bindings.sizes[i] > 0 &&
+                                          bindings.sizes[i] <= std::numeric_limits<u32>::max()
+                                      ? vertex_repack_pass->Assemble(
+                                            handle, static_cast<u32>(bindings.offsets[i]),
+                                            static_cast<u32>(bindings.sizes[i]))
+                                      : std::nullopt;
             if (!repacked) {
+                KeepVertexLayout(binding);
                 continue;
             }
             buffer_handles[i] = repacked->first;
