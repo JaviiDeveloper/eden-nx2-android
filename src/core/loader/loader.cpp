@@ -19,7 +19,6 @@
 #include "core/file_sys/control_metadata.h"
 #include "core/file_sys/common_funcs.h"
 #include "core/file_sys/content_archive.h"
-#include "core/file_sys/nup.h"
 #include "core/file_sys/registered_cache.h"
 #include "core/file_sys/submission_package.h"
 #include "core/hle/kernel/k_process.h"
@@ -30,7 +29,6 @@
 #include "core/loader/nro.h"
 #include "core/loader/nso.h"
 #include "core/loader/nsp.h"
-#include "core/loader/nup.h"
 #include "core/loader/xci.h"
 
 namespace Loader {
@@ -128,9 +126,7 @@ bool HasApplicationProgramContent(const std::shared_ptr<FileSys::NSP>& nsp) {
 } // namespace
 
 FileType IdentifyFile(FileSys::VirtualFile file) {
-    if (const auto nup_type = IdentifyFileLoader<AppLoader_Nup>(file)) {
-        return *nup_type;
-    } else if (const auto nsp_type = IdentifyFileLoader<AppLoader_NSP>(file)) {
+    if (const auto nsp_type = IdentifyFileLoader<AppLoader_NSP>(file)) {
         return *nsp_type;
     } else if (const auto xci_type = IdentifyFileLoader<AppLoader_XCI>(file)) {
         return *xci_type;
@@ -154,7 +150,7 @@ FileType IdentifyFile(FileSys::VirtualFile file) {
 
 bool IsContainerType(FileType type) {
     return type == FileType::NSP || type == FileType::NSZ || type == FileType::XCI ||
-           type == FileType::XCZ || type == FileType::NUP;
+           type == FileType::XCZ;
 }
 
 bool IsBootableGameContainer(FileSys::VirtualFile file, FileType type, u64 program_id,
@@ -169,18 +165,6 @@ bool IsBootableGameContainer(FileSys::VirtualFile file, FileType type, u64 progr
 
     if (!IsContainerType(type)) {
         return false;
-    }
-
-    // NUP containers are bootable if they have a base package with an exefs
-    if (type == FileType::NUP) {
-        FileSys::NUP nup{file};
-        if (nup.GetStatus() != ResultStatus::Success) {
-            return false;
-        }
-        const auto* base = nup.GetBasePackage();
-        const auto updates = nup.GetUpdatePackages();
-        return (base != nullptr && base->exefs_dir != nullptr) ||
-               (!updates.empty() && updates.back()->exefs_dir != nullptr);
     }
 
     return HasApplicationProgramContent(OpenContainerAsNsp(file, type, program_id, program_index));
@@ -208,8 +192,6 @@ FileType GuessFromFilename(const std::string& name) {
         return FileType::NSP;
     else if (extension == "nsz")
         return FileType::NSZ;
-    else if (extension == "nup")
-        return FileType::NUP;
     else if (extension == "kip")
         return FileType::KIP;
     return FileType::Unknown;
@@ -235,8 +217,6 @@ std::string GetFileTypeString(FileType type) {
         return "NSZ";
     case FileType::KIP:
         return "KIP";
-    case FileType::NUP:
-        return "NUP";
     case FileType::DeconstructedRomDirectory:
         return "Directory";
     case FileType::Error:
@@ -395,10 +375,6 @@ static std::unique_ptr<AppLoader> GetFileLoader(Core::System& system, FileSys::V
         return std::make_unique<AppLoader_NSP>(std::move(file), system.GetFileSystemController(),
                                                system.GetContentProvider(), program_id,
                                                program_index);
-
-    // NUP (NX Package) container format
-    case FileType::NUP:
-        return std::make_unique<AppLoader_Nup>(std::move(file));
 
     // NX KIP (Kernel Internal Process) file format
     case FileType::KIP:
