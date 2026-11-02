@@ -34,8 +34,8 @@ You don't need to change any settings. Everything is already set up.
 - An Android phone with **Android 13 or newer**.
 - **16 GB of RAM** is best. 12 GB may work for small games.
 - A phone with an **Adreno** GPU (most Snapdragon phones). Other phones are not tested.
-- Your own Switch 2 games, as **loose folders** (a folder with `exefs` and `romfs` inside). NSP and XCI files do
-  not work for Switch 2 games.
+- Your own Switch 2 games, as **loose folders** (a folder with `exefs` and `romfs` inside) or as
+  [NUP](https://github.com/a55uka/nup) files (`.nup`). NSP and XCI files do not work for Switch 2 games.
 - You do **not** need keys or firmware for Switch 2 games.
 
 ## How to start (5 steps)
@@ -176,6 +176,10 @@ Built on PokeDinner 2.0.0. On top of it:
   storage CAS helper the stock driver needs.
 - **Memory:** Dynarmic's arm64 per-block metadata in vectors (it was over 1 GiB) and guest thread stacks left
   uninitialized (about 490 MiB saved).
+- **From other forks:** fixes from [Djihads80's](https://github.com/Djihads80/Eglantine) and
+  [Zortos'](https://github.com/zortos293/Eglantine) Eglantine (frame pacing, shaders, sparse textures, NUP files, a
+  memory limit for phone GPUs) and from [JaviiDeveloper](https://github.com/JaviiDeveloper/eden-nx2-android) (game
+  folder detection), with their authors kept in the history.
 - All tested fixes are built in and always on in release APKs.
 
 Licence: GPLv3 or later, same as Eden. The bundled Turnip driver is unmodified Mesa (MIT licence). Every release is
