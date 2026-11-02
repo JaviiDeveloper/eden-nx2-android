@@ -102,11 +102,8 @@ file when you report a problem.
 
 ## Which games work
 
-Tested on one phone (Snapdragon SM8850, 16 GB RAM).
-
-| Game | Works? |
-| --- | --- |
-| Other games | ❓ Not tested. Tell us how they run |
+Tested on one phone (Snapdragon SM8850, 16 GB RAM). Most games run slowly or have graphics problems. There is no
+game list: try your own games.
 
 ## If something goes wrong
 
@@ -152,6 +149,7 @@ the logs. Do it right after the problem, before you start a game again.
 ## Please be careful
 
 - **Only use games you own.** This app has no games, keys or firmware.
+- **Don't ask for games, keys or firmware**, here or anywhere else. Such requests are deleted.
 - **Only download the app from this page.** Other copies could be fake.
 - **All files access** lets the app see all your files. You can turn it off when you are done playing.
 - Your phone **gets hot** and the **battery drains fast**.
@@ -176,6 +174,8 @@ Built on PokeDinner 2.0.0. On top of it:
   storage CAS helper the stock driver needs.
 - **Memory:** Dynarmic's arm64 per-block metadata in vectors (it was over 1 GiB) and guest thread stacks left
   uninitialized (about 490 MiB saved).
+- **Graphics fixes:** register HSETP2 in shaders, an upscaler stand-in, more QMD layouts, and unmapped texture
+  buffers.
 - **From other forks:** fixes from [Djihads80's](https://github.com/Djihads80/Eglantine) and
   [Zortos'](https://github.com/zortos293/Eglantine) Eglantine (frame pacing, shaders, sparse textures, NUP files, a
   memory limit for phone GPUs) and from [JaviiDeveloper](https://github.com/JaviiDeveloper/eden-nx2-android) (game
