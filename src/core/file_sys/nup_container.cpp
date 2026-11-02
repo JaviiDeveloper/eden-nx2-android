@@ -389,6 +389,7 @@ bool NupContainer::Parse() {
         std::memcpy(&record, base + pos, sizeof(record));
         pos += FileRecordSize;
         if (record.codec > CodecZstd || record.codec_flags != 0 ||
+            (record.codec == CodecRaw && record.extent_size != record.size) ||
             (record.size == 0 && (record.extent_offset != 0 || record.extent_size != 0)) ||
             (record.size != 0 &&
              (record.extent_size == 0 || record.extent_offset < blob_offset ||
@@ -410,8 +411,21 @@ bool NupContainer::Parse() {
 
     children.resize(children_bytes / sizeof(u32));
     std::memcpy(children.data(), base + children_offset, children_bytes);
+    // Every directory has at most one parent and package roots have none, so the trees the
+    // loader walks recursively cannot contain a cycle.
+    std::vector<u8> dir_parents(dirs.size(), 0);
     for (const u32 child : children) {
         if (child >= header.dir_count + header.file_count) {
+            status = Loader::ResultStatus::ErrorNUPBadFormat;
+            return false;
+        }
+        if (child < dirs.size() && dir_parents[child]++ != 0) {
+            status = Loader::ResultStatus::ErrorNUPBadFormat;
+            return false;
+        }
+    }
+    for (const auto& package : packages) {
+        if (dir_parents[package.root_dir] != 0) {
             status = Loader::ResultStatus::ErrorNUPBadFormat;
             return false;
         }
