@@ -1124,7 +1124,7 @@ private:
             WaitForFrame(~w[22], w[24]);
         }
         const auto waited = std::chrono::steady_clock::now();
-        Composite(w[5], w[7], ~w[22], w[24]);
+        Composite(w[5], ~w[22], w[24]);
         const auto composited = std::chrono::steady_clock::now();
         PaceToVblank();
         const auto paced = std::chrono::steady_clock::now();
@@ -1243,12 +1243,10 @@ private:
         }
     }
 
-    // Shows a presented native image: word 5 is the image id, word 7 the visible size
-    // ((height - 1) << 16 | (width - 1), from the top left), ~word 22 / word 24 the GPU fence
+    // Shows a presented native image: word 5 is the image id, ~word 22 / word 24 the GPU fence
     // (syncpoint, value) to wait for (layout from changes.patch). The image is a block-linear
     // RGBA8 surface in the console's native GOB layout at GPU address == CPU address.
-    // DK Bananza's window images are 2880x1620 and handheld frames fill 1920x1080 of them.
-    void Composite(u32 image_id, u32 visible_size, u32 fence_id, u32 fence_value) {
+    void Composite(u32 image_id, u32 fence_id, u32 fence_value) {
         u64 address{};
         Nx2ImageLayout layout{};
         {
@@ -1272,10 +1270,6 @@ private:
         }
         u32 crop_width = layout.width;
         u32 crop_height = layout.height;
-        if (visible_size != 0) {
-            crop_width = (std::min)((visible_size & 0xFFFF) + 1, layout.width);
-            crop_height = (std::min)((visible_size >> 16) + 1, layout.height);
-        }
         // Mario Kart World draws into the top-left corner of its present images: 2560x1440 docked
         // (in 3840x2160 images), 1920x1080 handheld. It keeps its docked images after a switch to
         // handheld, and showing all of them put the frame in a corner with stale docked frames
@@ -1305,8 +1299,8 @@ private:
                           (u64{crop_width} << 16) | crop_height;
         if (shown != m_shown_layout) {
             m_shown_layout = shown;
-            LOG_INFO(Service, "nx2:vi2 composite image {} layout {}x{}, visible {:#x}, crop {}x{}",
-                     image_id, layout.width, layout.height, visible_size, crop_width, crop_height);
+            LOG_INFO(Service, "nx2:vi2 composite image {} layout {}x{}, crop {}x{}",
+                     image_id, layout.width, layout.height, crop_width, crop_height);
         }
         std::vector<Tegra::FramebufferConfig> layers{Tegra::FramebufferConfig{
             .address = *device,
