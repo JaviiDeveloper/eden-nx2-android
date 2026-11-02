@@ -1472,6 +1472,7 @@ public:
             {212, &INx2Vi2Session::GetClientAvailability, "GetClientAvailability"},
             {251, &INx2Vi2Session::SucceedQuietly, "BindClientDisplay"},
             {252, &INx2Vi2Session::SucceedQuietly, "UnbindClientDisplay"},
+            {106, &INx2Vi2Session::GetBufferMaxResolution, "GetBufferMaxResolution"},
             {228, &INx2Vi2Session::CancelClientBuffer, "CancelClientBuffer"},
             {229, &INx2Vi2Session::PresentClientBuffer, "PresentClientBuffer"},
         });
@@ -1870,6 +1871,29 @@ private:
         rb.Push(result.raw);
         rb.Push(format);
         rb.Push<u32>(0);
+    }
+
+    // The highest buffer resolution mode of the "default" display. Fire Emblem: Fortune's Weave picks
+    // its output from it: 1 -> 1280x720, 2 -> 1920x1080, 4 and 8 -> 2560x1440; 0 (the auto stub's
+    // reply), 3 and 5 fall back to 720p. Docked reports 4, handheld 2 (the screen is 1080p);
+    // EDEN_VI2_MAX_RESOLUTION_MODE=<n> overrides.
+    void GetBufferMaxResolution(HLERequestContext& ctx) {
+        const auto* packet = ctx.CommandBuffer();
+        const u64 name = u64{packet[2]} | (u64{packet[3]} << 32);
+        constexpr u64 DefaultDisplay = 0x00746c7561666564ULL; // "default"
+        Result result = Kernel::ResultInvalidCombination;
+        u64 mode{};
+        if (packet[0] == 0x7a && packet[1] == 2) {
+            result = Result{ErrorModule::VI, 7};
+            if (name == DefaultDisplay) {
+                static const char* forced = std::getenv("EDEN_VI2_MAX_RESOLUTION_MODE");
+                mode = forced ? std::strtoull(forced, nullptr, 0) : Settings::IsDockedMode() ? 4 : 2;
+                result = ResultSuccess;
+            }
+        }
+        IPC::ResponseBuilder rb{ctx, 4};
+        rb.Push(result.raw);
+        rb.Push(mode);
     }
 
     // The same reply as the auto stub (success, no data), without its log lines.
