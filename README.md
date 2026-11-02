@@ -1,3 +1,8 @@
+> [!IMPORTANT]
+> **Status: unmaintained.** No further updates are planned. The source stays up under its license, and forks are welcome.
+> This was an experimental project and I enjoyed doing it, but I cannot maintain it. My aim was to
+> motivate people to work on the Android emulation scene, and it did. Now please go and support [Eden](https://git.eden-emu.dev/eden-emu/eden).
+
 > [!CAUTION]
 > **This project is only hosted here:** [git.eden-emu.dev/moceure/eden-nx2-android](https://git.eden-emu.dev/moceure/eden-nx2-android).
 > Copies on GitHub or other sites are not made by me, and their APKs are not mine. Only download
@@ -13,8 +18,7 @@
 > Please don't report problems with this app to Eden, PokeDinner, Eglantine, Eden-NS2 or Takoroka.
 
 > [!NOTE]
-> **This is an experiment, not an actively maintained project.** Updates may stop at any time. Anyone can fork this
-> repo and keep going. The real work is done by the original emulator projects: please contribute to them and give them
+> Anyone can fork this repo and keep going. The real work is done by the original emulator projects: please contribute to them and give them
 > a star: [Eden](https://git.eden-emu.dev/eden-emu/eden),
 > [PokeDinner](https://git.eden-emu.dev/Franseven/PokeDinner-a-Eglantine-Fork),
 > [Eglantine](https://github.com/Djihads80/Eglantine), [Eden-NS2](https://github.com/0x2593/Eden-NS2) and
