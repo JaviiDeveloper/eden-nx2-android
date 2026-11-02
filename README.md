@@ -1,3 +1,8 @@
+> [!CAUTION]
+> **This project is only hosted here:** [git.eden-emu.dev/moceure/eden-nx2-android](https://git.eden-emu.dev/moceure/eden-nx2-android).
+> Copies on GitHub or other sites are not made by me, and their APKs are not mine. Only download
+> releases from this page. Useful fixes from other copies get merged here, with credit.
+
 > [!IMPORTANT]
 > **AI disclaimer:** most of this fork's Android port (the code, docs and tooling on top of PokeDinner) was written
 > with the help of an AI coding assistant (Claude), then checked and tested by hand on one phone. It is
