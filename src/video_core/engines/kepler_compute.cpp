@@ -629,8 +629,10 @@ std::atomic<u32> g_nx2_trace_draws_after_upscale{};
 // Title 4's upscaler reads the tonemapped frame through the texture handle at cbuf0+0x90 and
 // writes the output resolution image through the surface handle at cbuf0+0xa0 (from its
 // TLD/SUST operands). DKB's reads a 960x540 B10G11R11 colour image and writes the 2880x1620
-// A8B8G8R8 window image. Blit input to output with bilinear filtering when both are plain 2D
-// colour images and the output is larger.
+// A8B8G8R8 window image. Fire Emblem: Fortune's Weave's DLSS network ends with a pass that reads
+// the input colour through cbuf0+0x328 and writes the DLSS output through cbuf0+0x348
+// (B10G11R11; 720p to 1440p docked). Blit input to output with bilinear filtering when both are
+// plain 2D colour images and the output is larger.
 bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
     const auto& cbuf = launch_description.const_buffer_config[0];
     const GPUVAddr cbuf_address = (GPUVAddr{cbuf.address_high} << 32) | cbuf.address_low;
@@ -737,6 +739,17 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
                 if (!tic || tic->Address() == output->Address() || !fits(*tic, *output)) continue;
                 if (!input || area(*tic) > area(*input)) input = tic, input_offset = offset;
             }
+        }
+    }
+    bool fortunes_weave = false;
+    if (!input) {
+        const auto fe_input = usable(0x328), fe_output = usable(0x348);
+        if (fe_input && fe_output && fe_input->format == fe_output->format &&
+            fe_output->Width() > fe_input->Width()) {
+            input = fe_input, output = fe_output;
+            input_offset = 0x328, output_offset = 0x348;
+            pair_source = "cbuf0";
+            fortunes_weave = true;
         }
     }
     if (!input) {
