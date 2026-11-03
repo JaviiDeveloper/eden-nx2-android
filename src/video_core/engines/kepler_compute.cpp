@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <bitset>
 #include <cstdlib>
 #include <fstream>
@@ -559,6 +560,7 @@ bool KeplerCompute::DispatchNativeCompute(const NativeQmdScheduler::Descriptor& 
             // The console runs this on tensor cores; stand in with a plain upscale of its input.
             return UpscaleInsteadOfNativeProgram();
         }
+        RememberDlssMotionVectors();
         return false;
     }
     return true;
@@ -626,11 +628,38 @@ const std::vector<KeplerCompute::NativeImageReference>& KeplerCompute::NativeIma
 
 std::atomic<u32> g_nx2_trace_draws_after_upscale{};
 
+// Fire Emblem: Fortune's Weave's first DLSS pass (rejected, before the network) has the input colour
+// at cbuf0+0x278, its motion vectors (R16G16 float, the input's size) at +0x290 and this frame's
+// camera jitter (x, y; input pixels, Halton bases 2 and 3 less 0.5) at +0x1b0.
+void KeplerCompute::RememberDlssMotionVectors() {
+    const auto& cbuf = launch_description.const_buffer_config[0];
+    if (cbuf.size.Value() < 0x294) return;
+    const GPUVAddr cbuf_address = (GPUVAddr{cbuf.address_high} << 32) | cbuf.address_low;
+    const auto image = [&](u32 offset) -> std::optional<Texture::TICEntry> {
+        const u32 handle = memory_manager.Read<u32>(cbuf_address + offset);
+        const u32 tic_index = handle & 0xfffff;
+        if (handle == 0 || tic_index > regs.tic.limit) return std::nullopt;
+        return GetTICEntry(tic_index);
+    };
+    const auto color = image(0x278), motion = image(0x290);
+    if (!color || !motion || color->format != Texture::TextureFormat::B10G11R11 ||
+        motion->format != Texture::TextureFormat::R16G16 || motion->Address() == 0 ||
+        motion->Width() != color->Width() || motion->Height() != color->Height() ||
+        !motion->IsBlockLinear())
+        return;
+    dlss_motion_vectors = *motion;
+    dlss_motion_color = color->Address();
+    dlss_jitter = {std::bit_cast<f32>(memory_manager.Read<u32>(cbuf_address + 0x1b0)),
+                   std::bit_cast<f32>(memory_manager.Read<u32>(cbuf_address + 0x1b4))};
+}
+
 // Title 4's upscaler reads the tonemapped frame through the texture handle at cbuf0+0x90 and
 // writes the output resolution image through the surface handle at cbuf0+0xa0 (from its
 // TLD/SUST operands). DKB's reads a 960x540 B10G11R11 colour image and writes the 2880x1620
-// A8B8G8R8 window image. Blit input to output with bilinear filtering when both are plain 2D
-// colour images and the output is larger.
+// A8B8G8R8 window image. Fire Emblem: Fortune's Weave's DLSS network ends with a pass that reads
+// the input colour through cbuf0+0x328 and writes the DLSS output through cbuf0+0x348
+// (B10G11R11; 720p to 1440p docked). Blit input to output with bilinear filtering when both are
+// plain 2D colour images and the output is larger.
 bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
     const auto& cbuf = launch_description.const_buffer_config[0];
     const GPUVAddr cbuf_address = (GPUVAddr{cbuf.address_high} << 32) | cbuf.address_low;
@@ -737,6 +766,17 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
                 if (!tic || tic->Address() == output->Address() || !fits(*tic, *output)) continue;
                 if (!input || area(*tic) > area(*input)) input = tic, input_offset = offset;
             }
+        }
+    }
+    bool fortunes_weave = false;
+    if (!input) {
+        const auto fe_input = usable(0x328), fe_output = usable(0x348);
+        if (fe_input && fe_output && fe_input->format == fe_output->format &&
+            fe_output->Width() > fe_input->Width()) {
+            input = fe_input, output = fe_output;
+            input_offset = 0x328, output_offset = 0x348;
+            pair_source = "cbuf0";
+            fortunes_weave = true;
         }
     }
     if (!input) {
@@ -869,7 +909,23 @@ bool KeplerCompute::UpscaleInsteadOfNativeProgram() {
             source.format = static_cast<RTFormat>(std::strtoul(value, nullptr, 16));
         }
     }
-    const bool done = rasterizer->AccelerateSurfaceCopy(source, surface(*output, output_format), config);
+    // Fortune's Weave: a temporal upscale along its motion vectors that undoes this frame's camera
+    // jitter (both from the frame's first DLSS pass) and accumulates the frames as DLSS would.
+    // EDEN_NX2_TEMPORAL_UPSCALE=0 blits instead.
+    const auto upscale_temporally = [&] {
+        static const bool enabled = [] {
+            const char* value = std::getenv("EDEN_NX2_TEMPORAL_UPSCALE");
+            return value == nullptr || std::string_view{value} != "0";
+        }();
+        if (!fortunes_weave || !enabled || !dlss_motion_vectors ||
+            dlss_motion_color != input->Address())
+            return false;
+        const Fermi2D::Surface motion = surface(*dlss_motion_vectors, RTFormat::R16G16_FLOAT);
+        return rasterizer->AccelerateTemporalUpscale(source, surface(*output, output_format), motion, dlss_jitter,
+                                                     {1.0f, 1.0f});
+    };
+    const bool done = upscale_temporally() ||
+                      rasterizer->AccelerateSurfaceCopy(source, surface(*output, output_format), config);
     if (static u32 checked{}; checked++ == sample_at) {
         const u64 size = u64{output->Width()} * output->Height() * 4;
         if (const auto device = memory_manager.GpuToCpuAddress(output->Address())) {

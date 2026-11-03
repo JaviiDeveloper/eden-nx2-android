@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <array>
 #include <functional>
 #include <optional>
 #include <span>
@@ -150,6 +151,9 @@ public:
     /// Notify the host renderer to wait for previous primitive and compute operations.
     virtual void WaitForIdle() = 0;
 
+    /// Emulate the NX2 PBDMA memory barrier when the backend requires an explicit barrier.
+    virtual void Nx2Membar() {}
+
     /// Notify the host renderer to wait for reads and writes to render targets and flush caches.
     virtual void FragmentBarrier() = 0;
 
@@ -170,6 +174,16 @@ public:
     [[nodiscard]] virtual bool AccelerateSurfaceCopy(
         const Tegra::Engines::Fermi2D::Surface& src, const Tegra::Engines::Fermi2D::Surface& dst,
         const Tegra::Engines::Fermi2D::Config& copy_config) {
+        return false;
+    }
+
+    /// Stand-in for a DLSS evaluation: temporal upscale of src into dst along motion_vectors
+    /// (jitter in src pixels; motion_scale turns a motion vector into a UV offset to the previous
+    /// frame). False when unsupported; the caller then falls back to AccelerateSurfaceCopy.
+    [[nodiscard]] virtual bool AccelerateTemporalUpscale(
+        const Tegra::Engines::Fermi2D::Surface& src, const Tegra::Engines::Fermi2D::Surface& dst,
+        const Tegra::Engines::Fermi2D::Surface& motion_vectors, std::array<f32, 2> jitter,
+        std::array<f32, 2> motion_scale) {
         return false;
     }
 

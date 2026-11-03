@@ -4,49 +4,62 @@
 #pragma once
 
 #include <memory>
-#include "common/common_types.h"
+#include <optional>
+#include <string>
+
+#include "core/file_sys/nup_container.h"
 #include "core/loader/loader.h"
 
 namespace FileSys {
-class NUP;
 class NACP;
+class NupContainer;
 } // namespace FileSys
 
 namespace Loader {
 
-class AppLoader_Nup final : public AppLoader {
+/// Loads a NUP (NX Package) container: loose ExeFS/RomFS trees for a base
+/// program plus its updates in one file. The newest update package is layered
+/// over the base; add-on content packages are recognized but not yet mounted.
+class AppLoader_NUP final : public AppLoader {
 public:
-    explicit AppLoader_Nup(FileSys::VirtualFile file);
-    ~AppLoader_Nup() override;
+    explicit AppLoader_NUP(FileSys::VirtualFile file_);
+    ~AppLoader_NUP() override;
 
+    /**
+     * Identifies whether or not the given file is a NUP container.
+     *
+     * @param nup_file The file to identify.
+     *
+     * @return FileType::NUP, or FileType::Error if the file is not a NUP.
+     */
     static FileType IdentifyType(const FileSys::VirtualFile& nup_file);
 
     FileType GetFileType() const override {
-        return IdentifyType(file);
+        return FileType::NUP;
     }
 
     LoadResult Load(Kernel::KProcess& process, Core::System& system) override;
 
+    ResultStatus VerifyIntegrity(std::function<bool(size_t, size_t)> progress_callback) override;
+
     ResultStatus ReadRomFS(FileSys::VirtualFile& out_file) override;
+    bool IsRomFSUpdatable() const override;
     ResultStatus ReadProgramId(u64& out_program_id) override;
+    ResultStatus ReadProgramIds(std::vector<u64>& out_program_ids) override;
     ResultStatus ReadIcon(std::vector<u8>& buffer) override;
     ResultStatus ReadTitle(std::string& title) override;
-    ResultStatus ReadControlData(FileSys::NACP& nacp) override;
-    ResultStatus ReadDisplayVersion(std::string& version) override;
-    bool IsRomFSUpdatable() const override;
-
+    ResultStatus ReadControlData(FileSys::NACP& control) override;
     ResultStatus ReadNSOModules(Modules& modules) override;
 
 private:
-    std::unique_ptr<FileSys::NUP> nup;
+    std::unique_ptr<FileSys::NupContainer> nup;
     std::unique_ptr<AppLoader> secondary_loader;
-    FileSys::VirtualFile romfs;
-    std::vector<u8> icon_data;
-    std::string title_name;
-    std::string publisher;
+
+    std::unique_ptr<FileSys::NACP> nacp_file;
+    FileSys::VirtualFile icon_file;
+    u64 base_title_id{};
     std::string display_version;
-    std::vector<u8> nacp_data;
-    u64 title_id{};
+    bool has_program{};
 };
 
 } // namespace Loader

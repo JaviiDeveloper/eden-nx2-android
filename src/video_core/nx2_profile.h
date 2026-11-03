@@ -64,8 +64,13 @@ inline constexpr std::array<const char*, static_cast<size_t>(Zone::Count)> zone_
     "fence skipped", "method", "split drain", "split wait",
 };
 
-// Read once at startup: Enabled() runs several times per method write (no guard to check).
-inline const bool g_enabled = std::getenv("EDEN_NX2_GPU_PROFILE") != nullptr;
+// Set by Init() when the GPU thread starts: Enabled() runs several times per method write (no
+// guard to check). Not read at load time, because Android sets the switches from nx2_env.txt later.
+inline bool g_enabled = false;
+
+inline void Init() {
+    g_enabled = std::getenv("EDEN_NX2_GPU_PROFILE") != nullptr;
+}
 
 inline bool Enabled() {
     return g_enabled;

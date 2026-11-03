@@ -56,6 +56,21 @@ private:
     vk::ShaderModule module;
 };
 
+class VertexRepackPass final : public ComputePass {
+public:
+    VertexRepackPass(const Device& device, Scheduler& scheduler, DescriptorPool& descriptor_pool,
+                     StagingBufferPool& staging_pool, ComputePassDescriptorQueue& descriptor_queue);
+    /// Splits a range over the device limits into several dispatches. Returns nothing only when
+    /// not even one vertex fits them; the caller then keeps the 69-byte layout.
+    std::optional<std::pair<VkBuffer, VkDeviceSize>> Assemble(VkBuffer source, u32 offset,
+                                                              u32 size);
+
+private:
+    Scheduler& scheduler;
+    StagingBufferPool& staging_pool;
+    ComputePassDescriptorQueue& descriptor_queue;
+};
+
 class Uint8Pass final : public ComputePass {
 public:
     explicit Uint8Pass(const Device& device_, Scheduler& scheduler_,

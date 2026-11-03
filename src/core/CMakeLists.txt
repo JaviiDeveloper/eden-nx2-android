@@ -74,8 +74,6 @@ add_library(core STATIC
     file_sys/fsa/fs_i_filesystem.h
     file_sys/fsmitm_romfsbuild.cpp
     file_sys/fsmitm_romfsbuild.h
-    file_sys/nup.cpp
-    file_sys/nup.h
     file_sys/fssrv/fssrv_sf_path.h
     file_sys/fssystem/fs_i_storage.h
     file_sys/fssystem/fs_types.h
@@ -134,6 +132,8 @@ add_library(core STATIC
     file_sys/program_metadata.h
     file_sys/registered_cache.cpp
     file_sys/registered_cache.h
+    file_sys/nup_container.cpp
+    file_sys/nup_container.h
     file_sys/romfs.cpp
     file_sys/romfs.h
     file_sys/romfs_factory.cpp
@@ -1257,6 +1257,17 @@ if (HAS_NCE)
         arm/nce/patcher.h
         arm/nce/visitor_base.h)
     target_link_libraries(core PRIVATE merry::oaknut)
+endif()
+
+# Native execution of application code on Apple silicon (EDEN_NX2_HYPERVISOR=1).
+if (APPLE AND ARCHITECTURE_arm64)
+    target_sources(core PRIVATE
+        arm/hypervisor/arm_hypervisor.cpp
+        arm/hypervisor/arm_hypervisor.h
+        arm/hypervisor/hv_vm.cpp
+        arm/hypervisor/hv_vm.h)
+    target_compile_definitions(core PRIVATE HAS_HYPERVISOR)
+    target_link_libraries(core PRIVATE "-framework Hypervisor")
 endif()
 
 if (ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64 OR ARCHITECTURE_riscv64 OR ARCHITECTURE_loongarch64)

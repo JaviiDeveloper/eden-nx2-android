@@ -37,8 +37,8 @@ You don't need to change any settings. Everything is already set up.
 - An Android phone with **Android 13 or newer**.
 - **16 GB of RAM** is best. 12 GB may work for small games.
 - A phone with an **Adreno** GPU (most Snapdragon phones). Other phones are not tested.
-- Your own Switch 2 games, as **loose folders** (a folder with `exefs` and `romfs` inside). NSP and XCI files do
-  not work for Switch 2 games.
+- Your own Switch 2 games, as **loose folders** (a folder with `exefs` and `romfs` inside) or as
+  [NUP](https://github.com/a55uka/nup) files (`.nup`). NSP and XCI files do not work for Switch 2 games.
 - You do **not** need keys or firmware for Switch 2 games.
 
 ## How to start (5 steps)
@@ -236,8 +236,6 @@ It's written in C++ with portability in mind, with builds for Windows, Linux and
 </p>
 
 ## Compatibility
-
-The emulator is capable of running Mario Kart World at decent/full speed depending on specs and configurations, and Splatoon Raiders at variable performances
 
 A list of supported games will be available in future. Please be patient.
 

@@ -19,7 +19,6 @@
 #include "core/file_sys/control_metadata.h"
 #include "core/file_sys/common_funcs.h"
 #include "core/file_sys/content_archive.h"
-#include "core/file_sys/nup.h"
 #include "core/file_sys/registered_cache.h"
 #include "core/file_sys/submission_package.h"
 #include "core/hle/kernel/k_process.h"
@@ -128,12 +127,12 @@ bool HasApplicationProgramContent(const std::shared_ptr<FileSys::NSP>& nsp) {
 } // namespace
 
 FileType IdentifyFile(FileSys::VirtualFile file) {
-    if (const auto nup_type = IdentifyFileLoader<AppLoader_Nup>(file)) {
-        return *nup_type;
-    } else if (const auto nsp_type = IdentifyFileLoader<AppLoader_NSP>(file)) {
+    if (const auto nsp_type = IdentifyFileLoader<AppLoader_NSP>(file)) {
         return *nsp_type;
     } else if (const auto xci_type = IdentifyFileLoader<AppLoader_XCI>(file)) {
         return *xci_type;
+    } else if (const auto nup_type = IdentifyFileLoader<AppLoader_NUP>(file)) {
+        return *nup_type;
     } else if (const auto nro_type = IdentifyFileLoader<AppLoader_NRO>(file)) {
         return *nro_type;
     } else if (const auto nca_type = IdentifyFileLoader<AppLoader_NCA>(file)) {
@@ -167,18 +166,26 @@ bool IsBootableGameContainer(FileSys::VirtualFile file, FileType type, u64 progr
         type = IdentifyFile(file);
     }
 
-    if (!IsContainerType(type)) {
-        return false;
-    }
-
-    // NUP containers are bootable if they have a base package with an exefs
     if (type == FileType::NUP) {
-        FileSys::NUP nup{file};
+        FileSys::NupContainer nup{file};
         if (nup.GetStatus() != ResultStatus::Success) {
             return false;
         }
-        const auto* base = nup.GetBasePackage();
-        return base != nullptr && base->exefs_dir != nullptr;
+        // A base package boots normally; a standalone update (no base) carries
+        // a complete patched tree and boots on its own (SPEC section 4.1.2).
+        if (const auto base = nup.FindBasePackage();
+            base.has_value() && nup.GetExeFSDir(*base) != nullptr) {
+            return true;
+        }
+        if (const auto update = nup.FindBestUpdatePackage();
+            update.has_value() && nup.GetExeFSDir(*update) != nullptr) {
+            return true;
+        }
+        return false;
+    }
+
+    if (!IsContainerType(type)) {
+        return false;
     }
 
     return HasApplicationProgramContent(OpenContainerAsNsp(file, type, program_id, program_index));
@@ -204,10 +211,10 @@ FileType GuessFromFilename(const std::string& name) {
         return FileType::XCZ;
     else if (extension == "nsp")
         return FileType::NSP;
-    else if (extension == "nsz")
-        return FileType::NSZ;
     else if (extension == "nup")
         return FileType::NUP;
+    else if (extension == "nsz")
+        return FileType::NSZ;
     else if (extension == "kip")
         return FileType::KIP;
     return FileType::Unknown;
@@ -231,10 +238,10 @@ std::string GetFileTypeString(FileType type) {
         return "NSP";
     case FileType::NSZ:
         return "NSZ";
-    case FileType::KIP:
-        return "KIP";
     case FileType::NUP:
         return "NUP";
+    case FileType::KIP:
+        return "KIP";
     case FileType::DeconstructedRomDirectory:
         return "Directory";
     case FileType::Error:
@@ -245,7 +252,7 @@ std::string GetFileTypeString(FileType type) {
     return "unknown";
 }
 
-constexpr std::array<const char*, 68> RESULT_MESSAGES{
+constexpr std::array<const char*, 70> RESULT_MESSAGES{
     "The operation completed successfully.",
     "The loader requested to load is already loaded.",
     "The operation is not implemented.",
@@ -314,6 +321,8 @@ constexpr std::array<const char*, 68> RESULT_MESSAGES{
     "The INI file contains more than the maximum allowable number of KIP files.",
     "Integrity verification could not be performed for this file.",
     "Integrity verification failed.",
+    "The NUP container is malformed or its TOC hash does not match.",
+    "The NUP container does not contain a loadable base package.",
 };
 
 std::string GetResultStatusString(ResultStatus status) {
@@ -394,13 +403,13 @@ static std::unique_ptr<AppLoader> GetFileLoader(Core::System& system, FileSys::V
                                                system.GetContentProvider(), program_id,
                                                program_index);
 
-    // NUP (NX Package) container format
-    case FileType::NUP:
-        return std::make_unique<AppLoader_Nup>(std::move(file));
-
     // NX KIP (Kernel Internal Process) file format
     case FileType::KIP:
         return std::make_unique<AppLoader_KIP>(std::move(file));
+
+    // NUP (NX Package) container format.
+    case FileType::NUP:
+        return std::make_unique<AppLoader_NUP>(std::move(file));
 
     // NX deconstructed ROM directory.
     case FileType::DeconstructedRomDirectory:
